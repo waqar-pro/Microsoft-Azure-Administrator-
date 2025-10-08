@@ -1,0 +1,838 @@
+Lab 2: Infrastructure as Code with Azure Resource Manager (ARM)
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Infrastructure as Code (IaC) and Azure Resource Manager (ARM) • Create and structure ARM templates using JSON syntax • Deploy multi-tier applications using ARM templates • Validate and troubleshoot ARM template deployments • Implement best practices for ARM template development • Use Azure CLI and open-source tools for ARM template management
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with JSON syntax and structure • Basic knowledge of Azure services (Virtual Machines, Storage, Networking) • Understanding of command-line interface operations • Access to a web browser for Azure portal access
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines. Simply click Start Lab to begin - no need to build your own VM or install additional software.
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines
+Al Nafi provides pre-configured Linux-based cloud machines with all necessary tools installed:
+
+• Azure CLI (latest version) • Text editors (nano, vim) • Git for version control • JSON validation tools
+
+Simply click Start Lab to access your environment.
+
+Task 1: Write an ARM Template for Resource Deployment
+Subtask 1.1: Understanding ARM Template Structure
+ARM templates are JSON files that define the infrastructure and configuration for your Azure solutions. Let's start by understanding the basic structure.
+
+Step 1: Access Your Lab Environment
+Click Start Lab to access your Linux-based cloud machine
+Open the terminal application
+Verify Azure CLI installation:
+az --version
+Step 2: Login to Azure
+Login to your Azure account:
+az login
+Follow the authentication prompts in your browser
+Verify your subscription:
+az account show
+Step 3: Create Project Directory
+Create a new directory for your ARM templates:
+mkdir arm-lab
+cd arm-lab
+Create subdirectories for organization:
+mkdir templates
+mkdir parameters
+mkdir scripts
+Subtask 1.2: Create Basic ARM Template Structure
+Step 1: Create Your First ARM Template
+Create a new ARM template file:
+nano templates/basic-template.json
+Add the basic ARM template structure:
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources"
+            }
+        },
+        "environmentName": {
+            "type": "string",
+            "defaultValue": "dev",
+            "allowedValues": [
+                "dev",
+                "test",
+                "prod"
+            ],
+            "metadata": {
+                "description": "Environment name"
+            }
+        }
+    },
+    "variables": {
+        "resourcePrefix": "[concat('lab2-', parameters('environmentName'))]"
+    },
+    "resources": [],
+    "outputs": {}
+}
+Save the file (Ctrl+X, then Y, then Enter)
+Step 2: Validate Template Syntax
+Validate your template syntax:
+az deployment group validate \
+    --resource-group myResourceGroup \
+    --template-file templates/basic-template.json \
+    --no-prompt
+Note: We'll create the resource group in the next step.
+
+Subtask 1.3: Create Multi-Tier Application ARM Template
+Step 1: Create Resource Group
+Create a resource group for your deployment:
+az group create \
+    --name lab2-rg \
+    --location eastus
+Step 2: Create Comprehensive Multi-Tier Template
+Create the main multi-tier application template:
+nano templates/multi-tier-app.json
+Add the complete multi-tier application template:
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources"
+            }
+        },
+        "environmentName": {
+            "type": "string",
+            "defaultValue": "dev",
+            "allowedValues": [
+                "dev",
+                "test",
+                "prod"
+            ]
+        },
+        "adminUsername": {
+            "type": "string",
+            "defaultValue": "azureuser",
+            "metadata": {
+                "description": "Admin username for VMs"
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Admin password for VMs"
+            }
+        },
+        "vmSize": {
+            "type": "string",
+            "defaultValue": "Standard_B1s",
+            "allowedValues": [
+                "Standard_B1s",
+                "Standard_B2s",
+                "Standard_D2s_v3"
+            ]
+        }
+    },
+    "variables": {
+        "resourcePrefix": "[concat('lab2-', parameters('environmentName'))]",
+        "vnetName": "[concat(variables('resourcePrefix'), '-vnet')]",
+        "webSubnetName": "web-subnet",
+        "appSubnetName": "app-subnet",
+        "dbSubnetName": "db-subnet",
+        "webNsgName": "[concat(variables('resourcePrefix'), '-web-nsg')]",
+        "appNsgName": "[concat(variables('resourcePrefix'), '-app-nsg')]",
+        "dbNsgName": "[concat(variables('resourcePrefix'), '-db-nsg')]",
+        "webVmName": "[concat(variables('resourcePrefix'), '-web-vm')]",
+        "appVmName": "[concat(variables('resourcePrefix'), '-app-vm')]",
+        "dbVmName": "[concat(variables('resourcePrefix'), '-db-vm')]",
+        "storageAccountName": "[concat(replace(variables('resourcePrefix'), '-', ''), 'storage')]",
+        "publicIpName": "[concat(variables('resourcePrefix'), '-web-pip')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-04-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "accessTier": "Hot"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('webNsgName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "HTTP",
+                        "properties": {
+                            "priority": 1000,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "*",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "80"
+                        }
+                    },
+                    {
+                        "name": "HTTPS",
+                        "properties": {
+                            "priority": 1001,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "*",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "443"
+                        }
+                    },
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "priority": 1002,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "*",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "22"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('appNsgName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "AppPort",
+                        "properties": {
+                            "priority": 1000,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "10.0.1.0/24",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "8080"
+                        }
+                    },
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "priority": 1001,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "10.0.1.0/24",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "22"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('dbNsgName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "MySQL",
+                        "properties": {
+                            "priority": 1000,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "10.0.2.0/24",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "3306"
+                        }
+                    },
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "priority": 1001,
+                            "protocol": "TCP",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "10.0.2.0/24",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "22"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('vnetName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('webNsgName'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('appNsgName'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('dbNsgName'))]"
+            ],
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "10.0.0.0/16"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('webSubnetName')]",
+                        "properties": {
+                            "addressPrefix": "10.0.1.0/24",
+                            "networkSecurityGroup": {
+                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('webNsgName'))]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "[variables('appSubnetName')]",
+                        "properties": {
+                            "addressPrefix": "10.0.2.0/24",
+                            "networkSecurityGroup": {
+                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('appNsgName'))]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "[variables('dbSubnetName')]",
+                        "properties": {
+                            "addressPrefix": "10.0.3.0/24",
+                            "networkSecurityGroup": {
+                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('dbNsgName'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/publicIPAddresses",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('publicIpName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2021-02-01",
+            "name": "[concat(variables('webVmName'), '-nic')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('webSubnetName'))]"
+                            },
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2021-02-01",
+            "name": "[concat(variables('appVmName'), '-nic')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('appSubnetName'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2021-02-01",
+            "name": "[concat(variables('dbVmName'), '-nic')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('dbSubnetName'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2021-03-01",
+            "name": "[variables('webVmName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('webVmName'), '-nic'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('webVmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "0001-com-ubuntu-server-focal",
+                        "sku": "20_04-lts-gen2",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "Standard_LRS"
+                        }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('webVmName'), '-nic'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2021-03-01",
+            "name": "[variables('appVmName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appVmName'), '-nic'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('appVmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "0001-com-ubuntu-server-focal",
+                        "sku": "20_04-lts-gen2",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "Standard_LRS"
+                        }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appVmName'), '-nic'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2021-03-01",
+            "name": "[variables('dbVmName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('dbVmName'), '-nic'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('dbVmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "0001-com-ubuntu-server-focal",
+                        "sku": "20_04-lts-gen2",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "Standard_LRS"
+                        }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('dbVmName'), '-nic'))]"
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "webVmPublicIP": {
+            "type": "string",
+            "value": "[reference(variables('publicIpName')).ipAddress]"
+        },
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "virtualNetworkName": {
+            "type": "string",
+            "value": "[variables('vnetName')]"
+        }
+    }
+}
+Save the file (Ctrl+X, then Y, then Enter)
+Step 3: Create Parameters File
+Create a parameters file for easier deployment:
+nano parameters/multi-tier-params.json
+Add the parameters:
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "value": "eastus"
+        },
+        "environmentName": {
+            "value": "dev"
+        },
+        "adminUsername": {
+            "value": "azureuser"
+        },
+        "adminPassword": {
+            "value": "P@ssw0rd123!"
+        },
+        "vmSize": {
+            "value": "Standard_B1s"
+        }
+    }
+}
+Save the file (Ctrl+X, then Y, then Enter)
+Task 2: Deploy Multi-Tier Application and Validate Deployment
+Subtask 2.1: Validate ARM Template
+Step 1: Template Validation
+Validate the template syntax and structure:
+az deployment group validate \
+    --resource-group lab2-rg \
+    --template-file templates/multi-tier-app.json \
+    --parameters parameters/multi-tier-params.json
+Check for any validation errors and fix them if necessary
+Step 2: Preview Deployment Changes
+Use the what-if operation to preview changes:
+az deployment group what-if \
+    --resource-group lab2-rg \
+    --template-file templates/multi-tier-app.json \
+    --parameters parameters/multi-tier-params.json
+Review the output to understand what resources will be created
+Subtask 2.2: Deploy the Multi-Tier Application
+Step 1: Execute Deployment
+Deploy the ARM template:
+az deployment group create \
+    --resource-group lab2-rg \
+    --template-file templates/multi-tier-app.json \
+    --parameters parameters/multi-tier-params.json \
+    --name multi-tier-deployment
+Monitor the deployment progress (this may take 10-15 minutes)
+Step 2: Check Deployment Status
+Check the deployment status:
+az deployment group show \
+    --resource-group lab2-rg \
+    --name multi-tier-deployment \
+    --query "properties.provisioningState"
+List all deployments in the resource group:
+az deployment group list \
+    --resource-group lab2-rg \
+    --output table
+Subtask 2.3: Validate Deployment Results
+Step 1: Verify Resource Creation
+List all resources in the resource group:
+az resource list \
+    --resource-group lab2-rg \
+    --output table
+Verify specific resource types:
+# Check Virtual Machines
+az vm list \
+    --resource-group lab2-rg \
+    --output table
+
+# Check Virtual Network
+az network vnet list \
+    --resource-group lab2-rg \
+    --output table
+
+# Check Storage Account
+az storage account list \
+    --resource-group lab2-rg \
+    --output table
+Step 2: Test Network Connectivity
+Get the public IP address of the web VM:
+az network public-ip show \
+    --resource-group lab2-rg \
+    --name lab2-dev-web-pip \
+    --query "ipAddress" \
+    --output tsv
+Test SSH connectivity to the web VM:
+# Replace <PUBLIC_IP> with the actual IP address
+ssh azureuser@<PUBLIC_IP>
+Note: You may need to accept the host key fingerprint
+
+Exit the SSH session:
+exit
+Step 3: Validate Network Security Groups
+Check NSG rules for the web tier:
+az network nsg rule list \
+    --resource-group lab2-rg \
+    --nsg-name lab2-dev-web-nsg \
+    --output table
+Verify subnet associations:
+az network vnet subnet list \
+    --resource-group lab2-rg \
+    --vnet-name lab2-dev-vnet \
+    --output table
+Subtask 2.4: Create Deployment Validation Script
+Step 1: Create Validation Script
+Create a validation script:
+nano scripts/validate-deployment.sh
+Add the validation script content:
+#!/bin/bash
+
+# ARM Template Deployment Validation Script
+# This script validates the multi-tier application deployment
+
+RESOURCE_GROUP="lab2-rg"
+DEPLOYMENT_NAME="multi-tier-deployment"
+
+echo "=== ARM Template Deployment Validation ==="
+echo "Resource Group: $RESOURCE_GROUP"
+echo "Deployment Name: $DEPLOYMENT_NAME"
+echo ""
+
+# Check deployment status
+echo "1. Checking deployment status..."
+DEPLOYMENT_STATUS=$(az deployment group show \
+    --resource-group $RESOURCE_GROUP \
+    --name $DEPLOYMENT_NAME \
+    --query "properties.provisioningState" \
+    --output tsv)
+
+echo "Deployment Status: $DEPLOYMENT_STATUS"
+
+if [ "$DEPLOYMENT_STATUS" = "Succeeded" ]; then
+    echo "✓ Deployment completed successfully"
+else
+    echo "✗ Deployment failed or is in progress"
+    exit 1
+fi
+
+echo ""
+
+# Count resources
+echo "2. Validating resource creation..."
+RESOURCE_COUNT=$(az resource list --resource-group $RESOURCE_GROUP --query "length(@)")
+echo "Total resources created: $RESOURCE_COUNT"
+
+# Expected resources: 3 VMs, 3 NICs, 1 VNet, 3 NSGs, 1 Storage Account, 1 Public IP = 12 resources
+if [ $RESOURCE_COUNT -ge 12 ]; then
+    echo "✓ Expected number of resources created"
+else
+    echo "✗ Missing resources (expected at least 12)"
+fi
+
+echo ""
+
+# Check VMs
+echo "3. Validating Virtual Machines..."
+VM_COUNT=$(az vm list --resource-group $RESOURCE_GROUP --query "length(@)")
+echo "VMs created: $VM_COUNT"
+
+if [ $VM_COUNT -eq 3 ]; then
+    echo "✓ All 3 VMs created successfully"
+    az vm list --resource-group $RESOURCE_GROUP --query "[].{Name:name, Status:powerState}" --output table
+else
+    echo "✗ Expected 3 VMs, found $VM_COUNT"
+fi
+
+echo ""
+
+# Check Network
+echo "4. Validating Network Configuration..."
+VNET_COUNT=$(az network vnet list --resource-group $RESOURCE_GROUP --query "length(@)")
+SUBNET_COUNT=$(az network vnet subnet list --resource-group $RESOURCE_GROUP --vnet-name lab2-dev-vnet --query "length(@)")
+
+echo "Virtual Networks: $VNET_COUNT"
+echo "Subnets: $SUBNET_COUNT"
+
+if [ $VNET_COUNT -eq 1 ] && [ $SUBNET_COUNT -eq 3 ]; then
+    echo "✓ Network configuration is correct"
+else
+    echo "✗ Network configuration issues detected"
+fi
+
+echo ""
+
+# Check Public IP
+echo "5. Validating Public IP..."
+PUBLIC_IP=$(az network public-ip show \
+    --resource-group $RESOURCE_GROUP \
+    --name lab2-dev-web-pip \
+    --query "ipAddress" \
+    --output tsv 2>/dev/null)
+
+if [ ! -z "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "null" ]; then
+    echo "✓ Public IP assigned: $PUBLIC_IP"
+else
+    echo "⚠ Public IP not yet assigned (this is normal for dynamic IPs)"
+fi
+
+echo ""
+
+# Check Storage Account
+echo "6. Validating Storage Account..."
+STORAGE_COUNT=$(az storage account list --resource-group $RESOURCE_GROUP --query "length(@)")
+
+if [ $STORAGE_COUNT -eq 1 ]; then
+    echo "✓ Storage account created successfully"
+    az storage account list --resource-group $RESOURCE_GROUP --query "[].{Name:name, Location:location, Sku:sku.name}" --output table
+else
+    echo "✗ Storage account validation failed"
+fi
+
+echo ""
+echo "=== Validation Complete ==="
+
+# Get deployment outputs
+echo "7. Deployment Outputs:"
+az deployment group show \
+    --resource-group $RESOURCE_GROUP \
+    --name $DEPLOYMENT_NAME \
+    --query "properties.outputs" \
+    --output json
+Make the script executable:
+chmod +x scripts/validate-deployment.sh
+Step 2: Run Validation Script
+Execute the validation script:
+./scripts/validate-deployment.sh
+Review the validation results and ensure all checks pass
+Subtask 2.5: Test Application Connectivity
+Step 1: Create Network Testing Script
+Create a network testing script:
+nano scripts/test-connectivity.sh
+Add the testing script content:
+#!/bin/bash
+
+# Network Connectivity Testing Script
+RESOURCE_GROUP="lab2-rg"
+
+echo "=== Network Connectivity Testing ==="
+
+# Get VM private IPs
+WEB_PRIVATE_IP=$(az vm list-ip-addresses \
+    --resource-group $RESOURCE_GROUP \
+    --name lab2-dev-web-vm \
+    --query "[0].virtualMachine.network.privateIpAddresses[0]" \
+    --output tsv)
+
+APP_PRIVATE_IP=$(az vm list-ip-addresses \
+    --resource-group $RESOURCE_GROUP \
+    --name lab2-dev-app-vm \
+    --query "[0].virtualMachine.network.privateIpAddresses[0]" \
+    --output tsv)
+
+DB_PRIVATE_IP=$(az vm list-ip-addresses \
+    --resource-group $RESOURCE_GROUP \
+    --name lab2-dev-db-vm \
+    --query "[0].virtualMachine.network.privateIpAddresses[0]" \
+    --output tsv)
+
+PUBLIC_IP=$(az network public-ip show \
+    --resource-group $RESOURCE_GROUP \
+    --name lab2-dev-web-pip \
+    --query "ipAddress" \
+    --output tsv)
+
+echo "Web VM Private IP: $WEB_PRIVATE_IP"
+echo "App VM Private IP: $APP_PRIVATE_IP"
+echo "DB VM Private IP: $DB_PRIVATE_IP"
+echo "Web VM Public IP: $PUBLIC_IP"
+
+echo ""
+echo "Network Topology Validation:"
+echo "✓ Web Tier (Public Subnet): $WEB_PRIVATE_IP"
+echo "✓ App Tier (Private Subnet): $APP_PRIVATE_IP"
+echo "✓ DB Tier (Private Subnet): $DB_PRIVATE_IP"
+
+# Test public connectivity
+if [ "$PUBLIC_IP"
