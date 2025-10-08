@@ -1,0 +1,365 @@
+Lab 3: Azure Networking & Security Basics
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Azure Virtual Networks (VNets) and their components • Create and configure Virtual Networks with multiple subnets • Implement Network Security Groups (NSGs) to control network traffic • Configure Azure Firewall for enhanced network security • Apply security rules and policies to protect network resources • Troubleshoot basic networking connectivity issues • Understand the relationship between VNets, subnets, NSGs, and Azure Firewall
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of networking concepts (IP addresses, subnets, firewalls) • Familiarity with Azure portal navigation • Active Azure subscription or access to Azure free tier • Basic knowledge of command-line interface (CLI) • Understanding of security principles and access control
+
+Ready-to-Use Cloud Machines
+Important Note: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build or configure your own virtual machine. Your cloud machine comes with:
+
+• Azure CLI pre-installed and configured • All necessary tools and dependencies • Internet connectivity for Azure resource management • Terminal access for command-line operations
+
+Task 1: Create a Virtual Network (VNet) and Configure Subnets
+Subtask 1.1: Understanding Virtual Networks
+A Virtual Network (VNet) is the fundamental building block for your private network in Azure. It enables Azure resources to securely communicate with each other, the internet, and on-premises networks.
+
+Key concepts: • Address Space: The range of IP addresses available for your VNet • Subnets: Segments within your VNet that organize and secure resources • Resource Groups: Logical containers that hold related Azure resources
+
+Subtask 1.2: Create a Resource Group
+First, let's create a resource group to organize our networking resources.
+
+Open your terminal in the Al Nafi cloud machine
+Login to Azure using the Azure CLI:
+az login
+Create a resource group:
+az group create \
+    --name NetworkingLabRG \
+    --location eastus
+Verify the resource group creation:
+az group show --name NetworkingLabRG --output table
+Subtask 1.3: Create a Virtual Network
+Now we'll create a VNet with a defined address space.
+
+Create the Virtual Network:
+az network vnet create \
+    --resource-group NetworkingLabRG \
+    --name LabVNet \
+    --address-prefix 10.0.0.0/16 \
+    --location eastus
+Verify the VNet creation:
+az network vnet show \
+    --resource-group NetworkingLabRG \
+    --name LabVNet \
+    --output table
+Subtask 1.4: Create Multiple Subnets
+We'll create three subnets for different purposes: web tier, application tier, and database tier.
+
+Create the Web Subnet:
+az network vnet subnet create \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name WebSubnet \
+    --address-prefix 10.0.1.0/24
+Create the Application Subnet:
+az network vnet subnet create \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name AppSubnet \
+    --address-prefix 10.0.2.0/24
+Create the Database Subnet:
+az network vnet subnet create \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name DatabaseSubnet \
+    --address-prefix 10.0.3.0/24
+List all subnets to verify creation:
+az network vnet subnet list \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --output table
+Subtask 1.5: View VNet Configuration
+Let's examine our VNet configuration in detail:
+
+az network vnet show \
+    --resource-group NetworkingLabRG \
+    --name LabVNet \
+    --output json | jq '.subnets[] | {name: .name, addressPrefix: .addressPrefix}'
+Task 2: Set up Network Security Groups (NSGs) and Implement Azure Firewall
+Subtask 2.1: Understanding Network Security Groups
+Network Security Groups (NSGs) contain security rules that allow or deny inbound and outbound network traffic. Think of NSGs as virtual firewalls that control traffic at the subnet or network interface level.
+
+Key concepts: • Security Rules: Define allowed or denied traffic based on source, destination, port, and protocol • Priority: Lower numbers have higher priority (100-4096) • Default Rules: Azure provides default rules that can't be deleted but can be overridden
+
+Subtask 2.2: Create Network Security Groups
+Create NSG for Web Subnet:
+az network nsg create \
+    --resource-group NetworkingLabRG \
+    --name WebSubnet-NSG \
+    --location eastus
+Create NSG for Application Subnet:
+az network nsg create \
+    --resource-group NetworkingLabRG \
+    --name AppSubnet-NSG \
+    --location eastus
+Create NSG for Database Subnet:
+az network nsg create \
+    --resource-group NetworkingLabRG \
+    --name DatabaseSubnet-NSG \
+    --location eastus
+List all NSGs:
+az network nsg list \
+    --resource-group NetworkingLabRG \
+    --output table
+Subtask 2.3: Configure Security Rules for Web Subnet
+The web subnet should allow HTTP (port 80) and HTTPS (port 443) traffic from the internet.
+
+Allow HTTP traffic:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name WebSubnet-NSG \
+    --name Allow-HTTP \
+    --priority 100 \
+    --source-address-prefixes '*' \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges 80 \
+    --access Allow \
+    --protocol Tcp \
+    --direction Inbound
+Allow HTTPS traffic:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name WebSubnet-NSG \
+    --name Allow-HTTPS \
+    --priority 110 \
+    --source-address-prefixes '*' \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges 443 \
+    --access Allow \
+    --protocol Tcp \
+    --direction Inbound
+Allow SSH for management (restrict to your IP for security):
+# Get your public IP address
+MY_IP=$(curl -s ifconfig.me)
+
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name WebSubnet-NSG \
+    --name Allow-SSH \
+    --priority 120 \
+    --source-address-prefixes $MY_IP/32 \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges 22 \
+    --access Allow \
+    --protocol Tcp \
+    --direction Inbound
+Subtask 2.4: Configure Security Rules for Application Subnet
+The application subnet should only accept traffic from the web subnet.
+
+Allow traffic from Web Subnet:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name AppSubnet-NSG \
+    --name Allow-From-Web \
+    --priority 100 \
+    --source-address-prefixes 10.0.1.0/24 \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges 8080 \
+    --access Allow \
+    --protocol Tcp \
+    --direction Inbound
+Deny all other inbound traffic:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name AppSubnet-NSG \
+    --name Deny-All-Inbound \
+    --priority 4000 \
+    --source-address-prefixes '*' \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges '*' \
+    --access Deny \
+    --protocol '*' \
+    --direction Inbound
+Subtask 2.5: Configure Security Rules for Database Subnet
+The database subnet should only accept traffic from the application subnet.
+
+Allow database traffic from App Subnet:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name DatabaseSubnet-NSG \
+    --name Allow-From-App \
+    --priority 100 \
+    --source-address-prefixes 10.0.2.0/24 \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges 3306 \
+    --access Allow \
+    --protocol Tcp \
+    --direction Inbound
+Deny all other inbound traffic:
+az network nsg rule create \
+    --resource-group NetworkingLabRG \
+    --nsg-name DatabaseSubnet-NSG \
+    --name Deny-All-Inbound \
+    --priority 4000 \
+    --source-address-prefixes '*' \
+    --source-port-ranges '*' \
+    --destination-address-prefixes '*' \
+    --destination-port-ranges '*' \
+    --access Deny \
+    --protocol '*' \
+    --direction Inbound
+Subtask 2.6: Associate NSGs with Subnets
+Now we'll associate each NSG with its corresponding subnet.
+
+Associate Web NSG with Web Subnet:
+az network vnet subnet update \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name WebSubnet \
+    --network-security-group WebSubnet-NSG
+Associate App NSG with App Subnet:
+az network vnet subnet update \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name AppSubnet \
+    --network-security-group AppSubnet-NSG
+Associate Database NSG with Database Subnet:
+az network vnet subnet update \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name DatabaseSubnet \
+    --network-security-group DatabaseSubnet-NSG
+Subtask 2.7: Create Azure Firewall Subnet
+Azure Firewall requires a dedicated subnet named AzureFirewallSubnet.
+
+Create the Azure Firewall Subnet:
+az network vnet subnet create \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --name AzureFirewallSubnet \
+    --address-prefix 10.0.4.0/26
+Subtask 2.8: Create Public IP for Azure Firewall
+Azure Firewall needs a public IP address.
+
+Create a public IP:
+az network public-ip create \
+    --resource-group NetworkingLabRG \
+    --name AzureFirewall-PIP \
+    --location eastus \
+    --allocation-method Static \
+    --sku Standard
+Subtask 2.9: Create Azure Firewall
+Create the Azure Firewall:
+az network firewall create \
+    --resource-group NetworkingLabRG \
+    --name LabAzureFirewall \
+    --location eastus \
+    --vnet-name LabVNet \
+    --public-ip AzureFirewall-PIP
+Note: Azure Firewall creation may take 5-10 minutes to complete.
+
+Verify firewall creation:
+az network firewall show \
+    --resource-group NetworkingLabRG \
+    --name LabAzureFirewall \
+    --output table
+Subtask 2.10: Configure Azure Firewall Rules
+Let's create application rules to control outbound traffic.
+
+Create a firewall policy:
+az network firewall policy create \
+    --resource-group NetworkingLabRG \
+    --name LabFirewallPolicy \
+    --location eastus
+Create a rule collection group:
+az network firewall policy rule-collection-group create \
+    --resource-group NetworkingLabRG \
+    --policy-name LabFirewallPolicy \
+    --name DefaultApplicationRuleCollectionGroup \
+    --priority 300
+Add application rules to allow web traffic:
+az network firewall policy rule-collection-group collection add-filter-collection \
+    --resource-group NetworkingLabRG \
+    --policy-name LabFirewallPolicy \
+    --rule-collection-group-name DefaultApplicationRuleCollectionGroup \
+    --name WebTrafficCollection \
+    --collection-priority 100 \
+    --action Allow \
+    --rule-name AllowWeb \
+    --rule-type ApplicationRule \
+    --source-addresses "10.0.1.0/24" \
+    --protocols Http=80 Https=443 \
+    --target-fqdns "*.microsoft.com" "*.ubuntu.com" "*.github.com"
+Associate the policy with the firewall:
+az network firewall update \
+    --resource-group NetworkingLabRG \
+    --name LabAzureFirewall \
+    --firewall-policy LabFirewallPolicy
+Subtask 2.11: View and Verify Configuration
+List all NSG rules for Web Subnet:
+az network nsg rule list \
+    --resource-group NetworkingLabRG \
+    --nsg-name WebSubnet-NSG \
+    --output table
+View firewall configuration:
+az network firewall show \
+    --resource-group NetworkingLabRG \
+    --name LabAzureFirewall \
+    --query "{Name:name,State:provisioningState,PrivateIP:ipConfigurations[0].privateIpAddress,PublicIP:ipConfigurations[0].publicIpAddress}" \
+    --output table
+View all subnets and their associated NSGs:
+az network vnet subnet list \
+    --resource-group NetworkingLabRG \
+    --vnet-name LabVNet \
+    --query "[].{Name:name,AddressPrefix:addressPrefix,NSG:networkSecurityGroup.id}" \
+    --output table
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Azure Firewall creation fails
+
+Solution: Ensure the AzureFirewallSubnet has the correct name and minimum /26 address space
+Issue 2: NSG rules not working as expected
+
+Solution: Check rule priority order (lower numbers = higher priority) and verify source/destination addresses
+Issue 3: Cannot access resources after applying NSGs
+
+Solution: Review default deny rules and ensure necessary allow rules are in place
+Issue 4: Azure CLI authentication errors
+
+Solution: Run az login again and ensure you have proper permissions
+Verification Commands
+Test your configuration with these commands:
+
+# Check resource group contents
+az resource list --resource-group NetworkingLabRG --output table
+
+# Verify VNet configuration
+az network vnet show --resource-group NetworkingLabRG --name LabVNet --query "{Name:name,AddressSpace:addressSpace.addressPrefixes,Subnets:subnets[].name}"
+
+# Check NSG effective rules
+az network nsg show --resource-group NetworkingLabRG --name WebSubnet-NSG --query "securityRules[].{Name:name,Priority:priority,Access:access,Direction:direction}"
+Conclusion
+Congratulations! You have successfully completed Lab 3: Azure Networking & Security Basics. In this lab, you accomplished the following:
+
+What You Learned
+• Virtual Network Fundamentals: Created a VNet with multiple subnets to segment network traffic and organize resources logically
+
+• Network Security Groups: Implemented NSGs with custom security rules to control inbound and outbound traffic at the subnet level
+
+• Azure Firewall: Deployed and configured Azure Firewall for centralized network security management and advanced threat protection
+
+• Security Best Practices: Applied the principle of least privilege by creating restrictive rules that only allow necessary traffic between network segments
+
+• Network Segmentation: Implemented a three-tier architecture (web, application, database) with appropriate security controls
+
+Why This Matters
+Network security is fundamental to cloud infrastructure protection. The skills you've developed in this lab are essential because:
+
+• Defense in Depth: Multiple layers of security (NSGs + Azure Firewall) provide comprehensive protection • Compliance: Many regulatory frameworks require network segmentation and access controls • Cost Management: Proper network design prevents security incidents that could be costly to remediate • Scalability: Well-designed network architecture supports future growth and expansion
+
+Next Steps
+To further enhance your Azure networking skills, consider:
+
+• Exploring Azure Application Gateway for load balancing • Learning about VNet peering for connecting multiple virtual networks • Investigating Azure Private Link for secure service connections • Studying Azure DDoS Protection for advanced threat mitigation
+
+You now have a solid foundation in Azure networking and security that will serve you well in designing and implementing secure cloud infrastructures.
