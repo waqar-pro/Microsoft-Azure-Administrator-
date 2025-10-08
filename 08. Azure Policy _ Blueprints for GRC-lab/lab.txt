@@ -1,0 +1,551 @@
+Lab 8: Azure Policy & Blueprints for GRC
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Governance, Risk, and Compliance (GRC) in cloud environments • Create and configure Azure policies to enforce organizational standards • Assign policies to different scopes (subscriptions, resource groups, resources) • Design and implement Azure Blueprints for standardized resource deployments • Monitor policy compliance and remediate non-compliant resources • Implement governance frameworks using open-source tools and Azure CLI • Evaluate policy effectiveness and blueprint deployment success
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Azure services and resource management • Knowledge of JSON syntax and structure • Understanding of command-line interface operations • Basic knowledge of PowerShell or Bash scripting • Access to an Azure subscription (free tier acceptable)
+
+Ready-to-Use Cloud Machines
+Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own virtual machine or install additional software. Your cloud machine comes with:
+
+• Azure CLI pre-installed and configured • PowerShell Core for cross-platform scripting • Text editors (nano, vim) for configuration files • All necessary dependencies and tools ready to use
+
+Task 1: Create and Assign Policies for Compliance
+Subtask 1.1: Set Up Azure CLI and Authentication
+First, let's ensure you're properly authenticated with Azure CLI.
+
+# Check if Azure CLI is installed
+az --version
+
+# Login to Azure (this will open a browser window)
+az login
+
+# Set your default subscription (replace with your subscription ID)
+az account set --subscription "your-subscription-id"
+
+# Verify your current subscription
+az account show --output table
+Subtask 1.2: Create a Resource Group for Testing
+Create a dedicated resource group for this lab to keep resources organized.
+
+# Create a resource group
+az group create \
+    --name "rg-policy-lab" \
+    --location "East US"
+
+# Verify the resource group creation
+az group show --name "rg-policy-lab" --output table
+Subtask 1.3: Explore Built-in Azure Policies
+Before creating custom policies, let's explore existing built-in policies.
+
+# List built-in policies related to tagging
+az policy definition list \
+    --query "[?policyType=='BuiltIn' && contains(displayName, 'tag')]" \
+    --output table
+
+# Get details of a specific policy (Require a tag on resources)
+az policy definition show \
+    --name "871b6d14-10aa-478d-b590-94f262ecfa99" \
+    --output json
+Subtask 1.4: Create a Custom Policy Definition
+Now, let's create a custom policy that requires all storage accounts to use HTTPS only.
+
+First, create the policy definition file:
+
+# Create a policy definition file
+cat > require-https-storage.json << 'EOF'
+{
+    "mode": "All",
+    "policyRule": {
+        "if": {
+            "allOf": [
+                {
+                    "field": "type",
+                    "equals": "Microsoft.Storage/storageAccounts"
+                },
+                {
+                    "field": "Microsoft.Storage/storageAccounts/supportsHttpsTrafficOnly",
+                    "notEquals": "true"
+                }
+            ]
+        },
+        "then": {
+            "effect": "deny"
+        }
+    },
+    "parameters": {},
+    "metadata": {
+        "displayName": "Require HTTPS for Storage Accounts",
+        "description": "This policy ensures that storage accounts only accept HTTPS traffic"
+    }
+}
+EOF
+Create the policy definition in Azure:
+
+# Create the custom policy definition
+az policy definition create \
+    --name "require-https-storage" \
+    --display-name "Require HTTPS for Storage Accounts" \
+    --description "Ensures storage accounts only accept HTTPS traffic" \
+    --rules require-https-storage.json \
+    --mode All
+
+# Verify the policy was created
+az policy definition show --name "require-https-storage" --output table
+Subtask 1.5: Create a Policy for Resource Tagging
+Create another policy that requires specific tags on all resources.
+
+# Create a tagging policy definition file
+cat > require-tags-policy.json << 'EOF'
+{
+    "mode": "Indexed",
+    "policyRule": {
+        "if": {
+            "anyOf": [
+                {
+                    "field": "tags['Environment']",
+                    "exists": "false"
+                },
+                {
+                    "field": "tags['Owner']",
+                    "exists": "false"
+                }
+            ]
+        },
+        "then": {
+            "effect": "deny"
+        }
+    },
+    "parameters": {},
+    "metadata": {
+        "displayName": "Require Environment and Owner Tags",
+        "description": "This policy requires Environment and Owner tags on all resources"
+    }
+}
+EOF
+Create the tagging policy:
+
+# Create the tagging policy definition
+az policy definition create \
+    --name "require-environment-owner-tags" \
+    --display-name "Require Environment and Owner Tags" \
+    --description "Requires Environment and Owner tags on all resources" \
+    --rules require-tags-policy.json \
+    --mode Indexed
+Subtask 1.6: Assign Policies to Resource Group
+Now let's assign our policies to the resource group we created.
+
+# Assign the HTTPS storage policy to the resource group
+az policy assignment create \
+    --name "https-storage-assignment" \
+    --display-name "HTTPS Storage Policy Assignment" \
+    --policy "require-https-storage" \
+    --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-policy-lab"
+
+# Assign the tagging policy to the resource group
+az policy assignment create \
+    --name "tagging-assignment" \
+    --display-name "Tagging Policy Assignment" \
+    --policy "require-environment-owner-tags" \
+    --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-policy-lab"
+
+# List all policy assignments for the resource group
+az policy assignment list \
+    --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/rg-policy-lab" \
+    --output table
+Subtask 1.7: Test Policy Enforcement
+Let's test our policies by attempting to create resources that violate them.
+
+# Try to create a storage account without HTTPS (this should fail)
+az storage account create \
+    --name "teststorage$(date +%s)" \
+    --resource-group "rg-policy-lab" \
+    --location "East US" \
+    --sku "Standard_LRS" \
+    --https-only false
+
+# Try to create a storage account without required tags (this should also fail)
+az storage account create \
+    --name "teststorage$(date +%s)" \
+    --resource-group "rg-policy-lab" \
+    --location "East US" \
+    --sku "Standard_LRS" \
+    --https-only true
+Now create a compliant storage account:
+
+# Create a compliant storage account with HTTPS and required tags
+az storage account create \
+    --name "compliantstorage$(date +%s)" \
+    --resource-group "rg-policy-lab" \
+    --location "East US" \
+    --sku "Standard_LRS" \
+    --https-only true \
+    --tags Environment=Development Owner=LabUser
+Task 2: Set Up a Governance Blueprint for Resource Deployments
+Subtask 2.1: Install Azure Blueprint Extension
+Since Azure Blueprints CLI commands are in preview, we need to install the extension.
+
+# Install the Azure Blueprint extension
+az extension add --name blueprint
+
+# Verify the extension is installed
+az extension list --output table
+Subtask 2.2: Create a Blueprint Definition
+Create a blueprint that includes our policies and standard resource configurations.
+
+# Create a directory for blueprint artifacts
+mkdir -p blueprint-artifacts
+
+# Create the main blueprint definition
+cat > blueprint-definition.json << 'EOF'
+{
+    "properties": {
+        "description": "GRC Compliance Blueprint for standardized deployments",
+        "targetScope": "subscription",
+        "parameters": {
+            "resourceGroupName": {
+                "type": "string",
+                "metadata": {
+                    "displayName": "Resource Group Name",
+                    "description": "Name of the resource group to create"
+                }
+            },
+            "location": {
+                "type": "string",
+                "defaultValue": "East US",
+                "metadata": {
+                    "displayName": "Location",
+                    "description": "Location for resources"
+                }
+            }
+        },
+        "resourceGroups": {
+            "standardResourceGroup": {
+                "name": "[parameters('resourceGroupName')]",
+                "location": "[parameters('location')]",
+                "metadata": {
+                    "displayName": "Standard Resource Group"
+                }
+            }
+        }
+    }
+}
+EOF
+Subtask 2.3: Create Blueprint Artifacts
+Create artifacts for the blueprint including policy assignments and resource templates.
+
+# Create a policy assignment artifact
+cat > blueprint-artifacts/policy-https-storage.json << 'EOF'
+{
+    "kind": "policyAssignment",
+    "properties": {
+        "displayName": "HTTPS Storage Policy Assignment",
+        "description": "Assigns the HTTPS storage policy to the resource group",
+        "policyDefinitionId": "/subscriptions/{subscription-id}/providers/Microsoft.Authorization/policyDefinitions/require-https-storage",
+        "parameters": {},
+        "resourceGroup": "standardResourceGroup"
+    }
+}
+EOF
+
+# Create a tagging policy assignment artifact
+cat > blueprint-artifacts/policy-tagging.json << 'EOF'
+{
+    "kind": "policyAssignment",
+    "properties": {
+        "displayName": "Tagging Policy Assignment",
+        "description": "Assigns the tagging policy to the resource group",
+        "policyDefinitionId": "/subscriptions/{subscription-id}/providers/Microsoft.Authorization/policyDefinitions/require-environment-owner-tags",
+        "parameters": {},
+        "resourceGroup": "standardResourceGroup"
+    }
+}
+EOF
+Subtask 2.4: Create an ARM Template Artifact
+Create an ARM template artifact for deploying a compliant storage account.
+
+# Create an ARM template for a compliant storage account
+cat > blueprint-artifacts/storage-template.json << 'EOF'
+{
+    "kind": "template",
+    "properties": {
+        "displayName": "Compliant Storage Account Template",
+        "description": "Deploys a storage account that meets compliance requirements",
+        "template": {
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+                "storageAccountName": {
+                    "type": "string",
+                    "metadata": {
+                        "description": "Name of the storage account"
+                    }
+                },
+                "location": {
+                    "type": "string",
+                    "defaultValue": "[resourceGroup().location]",
+                    "metadata": {
+                        "description": "Location for the storage account"
+                    }
+                }
+            },
+            "resources": [
+                {
+                    "type": "Microsoft.Storage/storageAccounts",
+                    "apiVersion": "2021-04-01",
+                    "name": "[parameters('storageAccountName')]",
+                    "location": "[parameters('location')]",
+                    "tags": {
+                        "Environment": "Production",
+                        "Owner": "ITDepartment",
+                        "Compliance": "Required"
+                    },
+                    "sku": {
+                        "name": "Standard_LRS"
+                    },
+                    "kind": "StorageV2",
+                    "properties": {
+                        "supportsHttpsTrafficOnly": true,
+                        "minimumTlsVersion": "TLS1_2",
+                        "allowBlobPublicAccess": false
+                    }
+                }
+            ]
+        },
+        "parameters": {
+            "storageAccountName": {
+                "value": "[concat('blueprintstorage', uniqueString(resourceGroup().id))]"
+            }
+        },
+        "resourceGroup": "standardResourceGroup"
+    }
+}
+EOF
+Subtask 2.5: Create the Blueprint
+Now let's create the blueprint in Azure.
+
+# Get your subscription ID
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+# Update the policy definition IDs in the artifacts
+sed -i "s/{subscription-id}/$SUBSCRIPTION_ID/g" blueprint-artifacts/policy-https-storage.json
+sed -i "s/{subscription-id}/$SUBSCRIPTION_ID/g" blueprint-artifacts/policy-tagging.json
+
+# Create the blueprint
+az blueprint create \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-compliance-blueprint" \
+    --definition blueprint-definition.json
+
+# Add the policy assignment artifacts
+az blueprint artifact policy create \
+    --subscription $SUBSCRIPTION_ID \
+    --blueprint-name "grc-compliance-blueprint" \
+    --artifact-name "https-storage-policy" \
+    --definition blueprint-artifacts/policy-https-storage.json
+
+az blueprint artifact policy create \
+    --subscription $SUBSCRIPTION_ID \
+    --blueprint-name "grc-compliance-blueprint" \
+    --artifact-name "tagging-policy" \
+    --definition blueprint-artifacts/policy-tagging.json
+
+# Add the ARM template artifact
+az blueprint artifact template create \
+    --subscription $SUBSCRIPTION_ID \
+    --blueprint-name "grc-compliance-blueprint" \
+    --artifact-name "compliant-storage" \
+    --definition blueprint-artifacts/storage-template.json
+Subtask 2.6: Publish the Blueprint
+Before we can assign a blueprint, we need to publish it.
+
+# Publish the blueprint
+az blueprint publish \
+    --subscription $SUBSCRIPTION_ID \
+    --blueprint-name "grc-compliance-blueprint" \
+    --version "1.0" \
+    --change-notes "Initial version of GRC compliance blueprint"
+
+# Verify the blueprint was published
+az blueprint show \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-compliance-blueprint" \
+    --output table
+Subtask 2.7: Assign the Blueprint
+Now let's assign the blueprint to create resources according to our governance standards.
+
+# Create a parameters file for the blueprint assignment
+cat > blueprint-assignment-params.json << 'EOF'
+{
+    "resourceGroupName": {
+        "value": "rg-blueprint-deployed"
+    },
+    "location": {
+        "value": "East US"
+    }
+}
+EOF
+
+# Assign the blueprint
+az blueprint assignment create \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-blueprint-assignment" \
+    --location "East US" \
+    --identity-type "SystemAssigned" \
+    --blueprint-version "/subscriptions/$SUBSCRIPTION_ID/providers/Microsoft.Blueprint/blueprints/grc-compliance-blueprint/versions/1.0" \
+    --parameters blueprint-assignment-params.json
+
+# Check the assignment status
+az blueprint assignment show \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-blueprint-assignment" \
+    --output table
+Subtask 2.8: Monitor Blueprint Deployment
+Monitor the blueprint deployment to ensure all resources are created successfully.
+
+# Check the deployment status
+az blueprint assignment show \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-blueprint-assignment" \
+    --query "provisioningState" \
+    --output tsv
+
+# List resources in the newly created resource group
+az resource list \
+    --resource-group "rg-blueprint-deployed" \
+    --output table
+
+# Check policy compliance for the new resource group
+az policy state list \
+    --resource-group "rg-blueprint-deployed" \
+    --output table
+Task 3: Monitor and Evaluate Compliance
+Subtask 3.1: Check Policy Compliance Status
+Let's monitor the compliance status of our policies across resources.
+
+# Get overall policy compliance summary
+az policy state summarize \
+    --subscription $SUBSCRIPTION_ID \
+    --output table
+
+# Get detailed compliance information for our resource groups
+az policy state list \
+    --resource-group "rg-policy-lab" \
+    --output table
+
+az policy state list \
+    --resource-group "rg-blueprint-deployed" \
+    --output table
+Subtask 3.2: Generate Compliance Reports
+Create scripts to generate compliance reports for governance purposes.
+
+# Create a compliance report script
+cat > generate-compliance-report.sh << 'EOF'
+#!/bin/bash
+
+echo "=== GRC Compliance Report ==="
+echo "Generated on: $(date)"
+echo ""
+
+echo "=== Policy Assignment Summary ==="
+az policy assignment list --output table
+
+echo ""
+echo "=== Overall Compliance Summary ==="
+az policy state summarize --output table
+
+echo ""
+echo "=== Non-Compliant Resources ==="
+az policy state list --filter "ComplianceState eq 'NonCompliant'" --output table
+
+echo ""
+echo "=== Blueprint Assignments ==="
+az blueprint assignment list --output table
+
+echo "=== End of Report ==="
+EOF
+
+# Make the script executable and run it
+chmod +x generate-compliance-report.sh
+./generate-compliance-report.sh
+Subtask 3.3: Set Up Policy Remediation
+For policies that support remediation, let's set up automatic remediation tasks.
+
+# Check if any policies support remediation
+az policy assignment list \
+    --query "[?policyDefinition.policyRule.then.effect=='deployIfNotExists' || policyDefinition.policyRule.then.effect=='modify']" \
+    --output table
+
+# Create a remediation task (example for a built-in policy)
+# Note: This is an example - actual remediation depends on your specific policies
+echo "Remediation tasks would be created here for policies that support it"
+echo "Example command structure:"
+echo "az policy remediation create --name 'remediation-task-name' --policy-assignment 'assignment-id'"
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Policy assignment fails
+
+# Check if the policy definition exists
+az policy definition show --name "your-policy-name"
+
+# Verify the scope is correct
+az account show --query id -o tsv
+Issue 2: Blueprint creation fails
+
+# Ensure the blueprint extension is installed
+az extension add --name blueprint
+
+# Check if you have the necessary permissions
+az role assignment list --assignee $(az account show --query user.name -o tsv) --output table
+Issue 3: Resources fail to deploy due to policy violations
+
+# Check policy compliance
+az policy state list --resource-group "your-resource-group" --output table
+
+# Review policy definitions
+az policy definition list --query "[?displayName=='Your Policy Name']" --output json
+Cleanup Resources
+After completing the lab, clean up the resources to avoid unnecessary charges.
+
+# Delete the blueprint assignment
+az blueprint assignment delete \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-blueprint-assignment" \
+    --yes
+
+# Delete resource groups
+az group delete --name "rg-policy-lab" --yes --no-wait
+az group delete --name "rg-blueprint-deployed" --yes --no-wait
+
+# Remove policy assignments
+az policy assignment delete --name "https-storage-assignment"
+az policy assignment delete --name "tagging-assignment"
+
+# Delete custom policy definitions
+az policy definition delete --name "require-https-storage"
+az policy definition delete --name "require-environment-owner-tags"
+
+# Delete the blueprint
+az blueprint delete \
+    --subscription $SUBSCRIPTION_ID \
+    --name "grc-compliance-blueprint" \
+    --yes
+Conclusion
+In this comprehensive lab, you have successfully:
+
+• Created custom Azure policies to enforce organizational compliance standards, including HTTPS requirements for storage accounts and mandatory resource tagging • Assigned policies at different scopes to understand how governance rules cascade through your Azure environment • Designed and implemented Azure Blueprints that combine policies, ARM templates, and resource groups into repeatable deployment packages • Tested policy enforcement by attempting to create non-compliant resources and observing how policies prevent violations • Monitored compliance status using Azure CLI commands to generate reports and track policy adherence • Implemented governance frameworks using open-source tools and command-line interfaces
+
+Why This Matters:
+
+Governance, Risk, and Compliance (GRC) is crucial for organizations to maintain security, meet regulatory requirements, and ensure consistent resource deployment. Azure Policy and Blueprints provide powerful tools to:
+
+Automate compliance by preventing non-compliant resources from being created
+Standardize deployments through blueprints that ensure consistent configurations
+Reduce risk by enforcing security and operational best practices
+Simplify auditing through centralized policy management and compliance reporting
+Scale governance across multiple subscriptions and resource groups
+The skills you've learned in this lab are directly applicable to real-world scenarios where organizations need to maintain compliance with standards like SOC 2, ISO 27001, HIPAA, or internal security policies. By combining policies and blueprints, you can create a robust governance framework that scales with your organization's growth while maintaining security and compliance standards.
