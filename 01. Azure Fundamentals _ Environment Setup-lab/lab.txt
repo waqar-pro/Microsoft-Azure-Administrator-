@@ -1,0 +1,367 @@
+Lab 1: Azure Fundamentals & Environment Setup
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamental concepts of Microsoft Azure cloud platform • Create and configure an Azure account for development purposes • Install and configure Azure CLI on a Linux environment • Navigate the Azure portal interface effectively • Deploy and manage a basic virtual machine using Azure CLI • Understand Azure resource groups and their importance • Apply basic Azure security and access management concepts
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line interface • Basic knowledge of networking concepts (IP addresses, ports) • A valid email address for Azure account creation • Access to a web browser (Chrome, Firefox, or Edge recommended)
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment - no need to build your own VM.
+
+Lab Environment Setup
+Ready-to-Use Cloud Machine Access
+Click the Start Lab button provided by Al Nafi
+Wait for the Linux-based cloud machine to initialize (typically 2-3 minutes)
+Access your machine through the provided web terminal or SSH connection
+Verify your environment by running:
+whoami
+pwd
+ls -la
+Your cloud machine comes pre-installed with essential tools including curl, wget, and text editors.
+
+Task 1: Create an Azure Account and Set Up the Environment
+Subtask 1.1: Azure Account Creation
+Open your web browser and navigate to the Azure portal:
+
+https://portal.azure.com
+Click on "Create a free account" or "Start free" button
+
+Provide your email address and follow the registration process:
+
+Enter a valid email address
+Create a strong password (minimum 8 characters with uppercase, lowercase, numbers, and symbols)
+Complete phone verification
+Provide credit card information (required for verification, but you won't be charged for free tier usage)
+Complete identity verification by providing:
+
+Phone number for SMS verification
+Credit card details for account verification
+Accept the terms and conditions and complete the signup process
+
+Subtask 1.2: Azure Portal Navigation
+Access the Azure Portal at https://portal.azure.com
+
+Explore the main dashboard components:
+
+Navigation menu (left sidebar)
+Search bar (top center)
+Notifications (bell icon)
+Settings (gear icon)
+Help and support (question mark icon)
+Familiarize yourself with key services:
+
+Click on "All services" in the left menu
+Browse through categories like Compute, Networking, Storage, and Databases
+Bookmark frequently used services
+Subtask 1.3: Create a Resource Group
+Navigate to Resource Groups:
+
+Click "Resource groups" in the left menu
+Or search for "Resource groups" in the search bar
+Create a new resource group:
+
+Click "+ Create" button
+Fill in the required information:
+Subscription: Your Azure subscription
+Resource group name: lab1-fundamentals-rg
+Region: East US (or your preferred region)
+Click "Review + create"
+Click "Create" to finalize
+Verify resource group creation:
+
+Navigate back to Resource groups
+Confirm "lab1-fundamentals-rg" appears in the list
+Task 2: Set Up Azure CLI and Deploy a Basic Virtual Machine
+Subtask 2.1: Install Azure CLI
+Update your system packages:
+
+sudo apt update && sudo apt upgrade -y
+Install required dependencies:
+
+sudo apt install -y curl apt-transport-https lsb-release gnupg
+Download and install Microsoft signing key:
+
+curl -sL https://packages.microsoft.com/keys/microsoft.asc | \
+gpg --dearmor | \
+sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+Add Azure CLI repository:
+
+AZ_REPO=$(lsb_release -cs)
+echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO main" | \
+sudo tee /etc/apt/sources.list.d/azure-cli.list
+Update package index and install Azure CLI:
+
+sudo apt update
+sudo apt install -y azure-cli
+Verify installation:
+
+az --version
+Subtask 2.2: Login to Azure CLI
+Initiate Azure login:
+
+az login
+Follow the authentication process:
+
+A web browser will open automatically
+If browser doesn't open, copy the provided URL and open it manually
+Enter your Azure credentials
+Grant permissions to Azure CLI
+Verify successful login:
+
+az account show
+List available subscriptions:
+
+az account list --output table
+Subtask 2.3: Configure Default Settings
+Set default resource group:
+
+az configure --defaults group=lab1-fundamentals-rg
+Set default location:
+
+az configure --defaults location=eastus
+Verify configuration:
+
+az configure --list-defaults
+Subtask 2.4: Deploy a Basic Virtual Machine
+Create a virtual network:
+
+az network vnet create \
+  --name lab1-vnet \
+  --resource-group lab1-fundamentals-rg \
+  --location eastus \
+  --address-prefix 10.0.0.0/16 \
+  --subnet-name lab1-subnet \
+  --subnet-prefix 10.0.1.0/24
+Create a network security group:
+
+az network nsg create \
+  --name lab1-nsg \
+  --resource-group lab1-fundamentals-rg \
+  --location eastus
+Add SSH rule to network security group:
+
+az network nsg rule create \
+  --resource-group lab1-fundamentals-rg \
+  --nsg-name lab1-nsg \
+  --name SSH \
+  --protocol tcp \
+  --priority 1001 \
+  --destination-port-range 22 \
+  --access allow
+Create a public IP address:
+
+az network public-ip create \
+  --name lab1-vm-ip \
+  --resource-group lab1-fundamentals-rg \
+  --location eastus \
+  --allocation-method Static
+Create a network interface:
+
+az network nic create \
+  --name lab1-vm-nic \
+  --resource-group lab1-fundamentals-rg \
+  --location eastus \
+  --subnet lab1-subnet \
+  --vnet-name lab1-vnet \
+  --public-ip-address lab1-vm-ip \
+  --network-security-group lab1-nsg
+Create the virtual machine:
+
+az vm create \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --location eastus \
+  --nics lab1-vm-nic \
+  --image Ubuntu2204 \
+  --size Standard_B1s \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --custom-data cloud-init.txt
+Create cloud-init configuration file (run this before the VM creation):
+
+cat > cloud-init.txt << EOF
+#cloud-config
+package_upgrade: true
+packages:
+  - nginx
+  - htop
+runcmd:
+  - systemctl start nginx
+  - systemctl enable nginx
+EOF
+Subtask 2.5: Verify VM Deployment
+Check VM status:
+
+az vm show \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --show-details \
+  --output table
+Get VM public IP address:
+
+az vm show \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --show-details \
+  --query publicIps \
+  --output tsv
+Test SSH connectivity:
+
+# Replace <PUBLIC_IP> with the actual IP address from step 2
+ssh azureuser@<PUBLIC_IP>
+Verify web server installation (from within the VM):
+
+sudo systemctl status nginx
+curl localhost
+Exit the VM:
+
+exit
+Subtask 2.6: Manage VM Operations
+Stop the virtual machine:
+
+az vm stop \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg
+Start the virtual machine:
+
+az vm start \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg
+Restart the virtual machine:
+
+az vm restart \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg
+Check VM power state:
+
+az vm get-instance-view \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --query instanceView.statuses[1] \
+  --output table
+Troubleshooting Common Issues
+Issue 1: Azure CLI Installation Fails
+Problem: Package installation errors or repository access issues
+
+Solution:
+
+# Clean package cache
+sudo apt clean
+sudo apt autoclean
+
+# Remove any conflicting packages
+sudo apt remove azure-cli
+
+# Retry installation with verbose output
+sudo apt install -y azure-cli --fix-missing
+Issue 2: VM Creation Fails Due to Quota Limits
+Problem: Subscription quota exceeded for VM cores
+
+Solution:
+
+# Check current usage
+az vm list-usage --location eastus --output table
+
+# Use smaller VM size
+az vm create \
+  --size Standard_B1ms \
+  # ... other parameters
+Issue 3: SSH Connection Refused
+Problem: Cannot connect to VM via SSH
+
+Solution:
+
+# Check NSG rules
+az network nsg rule list \
+  --resource-group lab1-fundamentals-rg \
+  --nsg-name lab1-nsg \
+  --output table
+
+# Verify VM is running
+az vm show \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --show-details \
+  --query powerState
+Issue 4: Azure CLI Login Issues
+Problem: Browser-based authentication fails
+
+Solution:
+
+# Use device code authentication
+az login --use-device-code
+
+# Or use service principal (advanced)
+az login --service-principal \
+  --username <app-id> \
+  --password <password> \
+  --tenant <tenant-id>
+Key Concepts Summary
+Azure Resource Hierarchy
+Subscription: Billing and access management boundary
+Resource Group: Logical container for related resources
+Resources: Individual services like VMs, storage accounts, networks
+Azure CLI Fundamentals
+Authentication: az login for interactive login
+Configuration: az configure for default settings
+Resource Management: CRUD operations on Azure resources
+Output Formats: JSON, table, TSV for different use cases
+Virtual Machine Components
+Compute: VM size and specifications
+Networking: Virtual networks, subnets, security groups
+Storage: OS disk and data disks
+Identity: Authentication and access control
+Cleanup Instructions
+To avoid unnecessary charges, clean up resources after completing the lab:
+
+Delete the virtual machine:
+
+az vm delete \
+  --name lab1-vm \
+  --resource-group lab1-fundamentals-rg \
+  --yes
+Delete associated resources:
+
+az network nic delete \
+  --name lab1-vm-nic \
+  --resource-group lab1-fundamentals-rg
+
+az network public-ip delete \
+  --name lab1-vm-ip \
+  --resource-group lab1-fundamentals-rg
+
+az network nsg delete \
+  --name lab1-nsg \
+  --resource-group lab1-fundamentals-rg
+
+az network vnet delete \
+  --name lab1-vnet \
+  --resource-group lab1-fundamentals-rg
+Delete the resource group (removes all contained resources):
+
+az group delete \
+  --name lab1-fundamentals-rg \
+  --yes \
+  --no-wait
+Conclusion
+Congratulations! You have successfully completed Lab 1: Azure Fundamentals & Environment Setup. In this lab, you accomplished several important milestones:
+
+What You Learned:
+
+Created and configured an Azure account with proper security settings
+Navigated the Azure portal and understood its key components
+Installed and configured Azure CLI on a Linux environment
+Created essential Azure resources including resource groups and virtual networks
+Deployed and managed a virtual machine using command-line tools
+Implemented basic security configurations with network security groups
+Performed common VM operations like start, stop, and restart
+Why This Matters: This foundational knowledge is crucial for anyone working with cloud infrastructure. Azure is one of the leading cloud platforms used by organizations worldwide, and the skills you've developed here form the basis for more advanced cloud operations, DevOps practices, and infrastructure automation.
+
+The Azure CLI skills you've gained will enable you to automate repetitive tasks, integrate Azure services into scripts and applications, and manage cloud resources efficiently. Understanding resource groups and networking concepts prepares you for designing scalable and secure cloud architectures.
+
+Next Steps: With this solid foundation, you're now ready to explore more advanced Azure services such as Azure Storage, Azure App Services, Azure Kubernetes Service, and infrastructure-as-code tools like Azure Resource Manager templates and Terraform.
+
+Remember to always follow the cleanup procedures to manage costs effectively and maintain good cloud hygiene practices in your future Azure projects.
