@@ -1,0 +1,563 @@
+Lab 4: Azure Active Directory & Identity Management
+Objectives
+By the end of this lab, students will be able to:
+
+• Set up and configure an Azure Active Directory (Azure AD) instance using open-source tools • Create and manage users and groups in a directory service environment • Implement Multi-Factor Authentication (MFA) for enhanced security • Understand the fundamentals of identity and access management • Configure role-based access control (RBAC) principles • Simulate enterprise identity management scenarios using open-source alternatives
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of Linux command line operations • Familiarity with user and group management concepts • Basic knowledge of authentication and authorization principles • Understanding of network security fundamentals • No prior experience with Azure AD required - we'll use open-source alternatives
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build or configure your own virtual machine.
+
+Your lab environment includes: • Ubuntu 22.04 LTS server • Pre-installed OpenLDAP server • FreeIPA identity management system • Google Authenticator for MFA implementation • Administrative privileges for configuration
+
+Task 1: Set up Directory Service (Azure AD Alternative)
+Subtask 1.1: Install and Configure FreeIPA Server
+FreeIPA is an open-source identity management system that provides similar functionality to Azure Active Directory.
+
+Step 1: Update the system and install FreeIPA server
+
+sudo apt update && sudo apt upgrade -y
+sudo apt install freeipa-server freeipa-server-dns -y
+Step 2: Configure hostname and DNS settings
+
+# Set hostname
+sudo hostnamectl set-hostname ipa.lab.local
+
+# Add hostname to hosts file
+echo "127.0.0.1 ipa.lab.local ipa" | sudo tee -a /etc/hosts
+
+# Verify hostname
+hostname -f
+Step 3: Install and configure FreeIPA server
+
+# Run FreeIPA server installation
+sudo ipa-server-install --setup-dns --forwarder=8.8.8.8 --forwarder=8.8.4.4
+
+# Follow the interactive prompts:
+# - Server host name: ipa.lab.local
+# - Domain name: lab.local
+# - Realm name: LAB.LOCAL
+# - Directory Manager password: (create a strong password)
+# - IPA admin password: (create a strong password)
+# - Continue with DNS configuration: yes
+Step 4: Verify FreeIPA installation
+
+# Check service status
+sudo systemctl status ipa
+
+# Test kinit authentication
+kinit admin
+klist
+
+# Access web interface (note the URL for later use)
+echo "FreeIPA Web UI available at: https://$(hostname -f)"
+Subtask 1.2: Configure Basic Directory Settings
+Step 1: Set up basic directory policies
+
+# Configure password policy
+ipa pwpolicy-mod --minlength=8 --minclasses=3
+
+# Set default user shell
+ipa config-mod --defaultshell=/bin/bash
+
+# Configure home directory settings
+ipa config-mod --homedirectory=/home
+Step 2: Create organizational units (groups)
+
+# Create department groups
+ipa group-add --desc="IT Department" it-department
+ipa group-add --desc="HR Department" hr-department
+ipa group-add --desc="Finance Department" finance-department
+ipa group-add --desc="Administrators" administrators
+Task 2: Configure Users and Groups
+Subtask 2.1: Create User Accounts
+Step 1: Create individual user accounts
+
+# Create IT department users
+ipa user-add jsmith --first=John --last=Smith --email=jsmith@lab.local --password
+
+ipa user-add agarcia --first=Ana --last=Garcia --email=agarcia@lab.local --password
+
+# Create HR department users
+ipa user-add mjohnson --first=Mike --last=Johnson --email=mjohnson@lab.local --password
+
+ipa user-add swilson --first=Sarah --last=Wilson --email=swilson@lab.local --password
+
+# Create Finance department users
+ipa user-add rbrown --first=Robert --last=Brown --email=rbrown@lab.local --password
+
+ipa user-add llee --first=Linda --last=Lee --email=llee@lab.local --password
+Step 2: Assign users to appropriate groups
+
+# Add users to IT department
+ipa group-add-member it-department --users=jsmith,agarcia
+
+# Add users to HR department
+ipa group-add-member hr-department --users=mjohnson,swilson
+
+# Add users to Finance department
+ipa group-add-member finance-department --users=rbrown,llee
+
+# Add IT users to administrators group
+ipa group-add-member administrators --users=jsmith
+Subtask 2.2: Configure Group Permissions and Roles
+Step 1: Create custom roles
+
+# Create help desk role
+ipa role-add --desc="Help Desk Support" helpdesk-role
+
+# Create department manager role
+ipa role-add --desc="Department Manager" manager-role
+
+# Create read-only role
+ipa role-add --desc="Read Only Access" readonly-role
+Step 2: Assign privileges to roles
+
+# Assign user management privileges to help desk
+ipa role-add-privilege helpdesk-role --privileges="User Administrators"
+
+# Assign group management to managers
+ipa role-add-privilege manager-role --privileges="Group Administrators"
+
+# Create and assign read-only privileges
+ipa privilege-add --desc="Read Only Privilege" readonly-privilege
+ipa role-add-privilege readonly-role --privileges=readonly-privilege
+Step 3: Assign roles to users
+
+# Assign help desk role to Ana Garcia
+ipa role-add-member helpdesk-role --users=agarcia
+
+# Assign manager role to department heads
+ipa role-add-member manager-role --users=mjohnson,rbrown
+
+# Assign read-only role to regular users
+ipa role-add-member readonly-role --users=swilson,llee
+Subtask 2.3: Test User Authentication
+Step 1: Test user login functionality
+
+# Test user authentication
+kinit jsmith
+# Enter password when prompted
+
+# Verify ticket
+klist
+
+# Test another user
+kdestroy
+kinit mjohnson
+klist
+Step 2: Verify group memberships
+
+# Check user group memberships
+ipa user-show jsmith --all
+
+# Check group members
+ipa group-show it-department --all
+
+# List all users in the system
+ipa user-find
+Task 3: Implement Multi-Factor Authentication (MFA)
+Subtask 3.1: Install and Configure OTP Authentication
+Step 1: Enable OTP authentication in FreeIPA
+
+# Enable OTP authentication
+ipa config-mod --enable-migration=TRUE
+
+# Install OTP-related packages
+sudo apt install freeipa-server-trust-ad libpam-google-authenticator -y
+Step 2: Configure OTP tokens for users
+
+# Add OTP token for user jsmith
+ipa otptoken-add --owner=jsmith --desc="John Smith Mobile Token"
+
+# The command will return a QR code URL and secret key
+# Note: In a real environment, users would scan this with their authenticator app
+Step 3: Create a script to generate OTP tokens
+
+# Create OTP token generation script
+cat > /tmp/generate_otp.sh << 'EOF'
+#!/bin/bash
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <username>"
+    exit 1
+fi
+
+USERNAME=$1
+
+echo "Generating OTP token for user: $USERNAME"
+ipa otptoken-add --owner=$USERNAME --desc="$USERNAME Mobile Token" --type=totp
+
+echo "Token generated successfully!"
+echo "User should configure their authenticator app with the provided secret."
+EOF
+
+chmod +x /tmp/generate_otp.sh
+Subtask 3.2: Configure PAM for Two-Factor Authentication
+Step 1: Install Google Authenticator PAM module
+
+# Install Google Authenticator
+sudo apt install libpam-google-authenticator -y
+
+# Configure PAM for SSH
+sudo cp /etc/pam.d/sshd /etc/pam.d/sshd.backup
+Step 2: Configure SSH for MFA
+
+# Edit SSH configuration
+sudo tee -a /etc/ssh/sshd_config << 'EOF'
+
+# Enable Challenge Response Authentication
+ChallengeResponseAuthentication yes
+
+# Enable PAM
+UsePAM yes
+
+# Require both password and OTP
+AuthenticationMethods publickey,keyboard-interactive keyboard-interactive
+EOF
+
+# Restart SSH service
+sudo systemctl restart sshd
+Step 3: Set up Google Authenticator for a test user
+
+# Switch to test user and set up authenticator
+sudo -u jsmith google-authenticator
+
+# Follow the prompts:
+# - Do you want authentication tokens to be time-based: y
+# - Do you want me to update your "/home/jsmith/.google_authenticator" file: y
+# - Do you want to disallow multiple uses: y
+# - Do you want to increase the original generation time window: n
+# - Do you want to enable rate-limiting: y
+Subtask 3.3: Test Multi-Factor Authentication
+Step 1: Create MFA testing script
+
+# Create MFA test script
+cat > /tmp/test_mfa.sh << 'EOF'
+#!/bin/bash
+
+echo "Testing Multi-Factor Authentication Setup"
+echo "========================================"
+
+# Test 1: Check if OTP tokens exist
+echo "1. Checking OTP tokens:"
+ipa otptoken-find
+
+# Test 2: Verify PAM configuration
+echo "2. Checking PAM configuration:"
+grep -n "google-authenticator" /etc/pam.d/sshd || echo "Google Authenticator not configured in PAM"
+
+# Test 3: Check SSH configuration
+echo "3. Checking SSH MFA configuration:"
+grep -n "ChallengeResponseAuthentication\|AuthenticationMethods" /etc/ssh/sshd_config
+
+echo "MFA testing completed!"
+EOF
+
+chmod +x /tmp/test_mfa.sh
+/tmp/test_mfa.sh
+Step 2: Simulate MFA login process
+
+# Create simulation script for MFA login
+cat > /tmp/simulate_mfa_login.sh << 'EOF'
+#!/bin/bash
+
+echo "MFA Login Simulation"
+echo "==================="
+
+echo "Step 1: User enters username and password"
+echo "Step 2: System prompts for OTP token"
+echo "Step 3: User enters 6-digit code from authenticator app"
+echo "Step 4: System grants access if both factors are correct"
+
+echo ""
+echo "Example OTP codes (for demonstration only):"
+echo "User: jsmith - Current OTP: $(date +%s | tail -c 7 | head -c 6)"
+echo "User: agarcia - Current OTP: $(date +%s | tail -c 6)"
+
+echo ""
+echo "In production, users would use their mobile authenticator apps"
+EOF
+
+chmod +x /tmp/simulate_mfa_login.sh
+/tmp/simulate_mfa_login.sh
+Task 4: Advanced Identity Management Configuration
+Subtask 4.1: Configure Self-Service Password Reset
+Step 1: Set up password reset policies
+
+# Configure password reset policy
+ipa pwpolicy-mod --maxlife=90 --minlife=1 --history=5
+
+# Enable self-service password reset
+ipa config-mod --enable-migration=TRUE
+Step 2: Create password reset notification script
+
+# Create password reset notification script
+cat > /tmp/password_reset_notify.sh << 'EOF'
+#!/bin/bash
+
+USER=$1
+EMAIL=$2
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <username> <email>"
+    exit 1
+fi
+
+echo "Password Reset Notification"
+echo "=========================="
+echo "User: $USER"
+echo "Email: $EMAIL"
+echo "Reset link would be sent to: $EMAIL"
+echo "Timestamp: $(date)"
+
+# In production, this would integrate with email service
+echo "Email sent successfully (simulated)"
+EOF
+
+chmod +x /tmp/password_reset_notify.sh
+Subtask 4.2: Implement Account Lockout Policies
+Step 1: Configure account lockout settings
+
+# Set account lockout policy
+ipa config-mod --maxfail=5 --failinterval=300 --lockouttime=1800
+
+# Create account unlock script
+cat > /tmp/unlock_account.sh << 'EOF'
+#!/bin/bash
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <username>"
+    exit 1
+fi
+
+USERNAME=$1
+
+echo "Unlocking account for user: $USERNAME"
+ipa user-unlock $USERNAME
+
+if [ $? -eq 0 ]; then
+    echo "Account unlocked successfully"
+else
+    echo "Failed to unlock account"
+fi
+EOF
+
+chmod +x /tmp/unlock_account.sh
+Subtask 4.3: Set up Audit Logging
+Step 1: Configure audit logging
+
+# Enable audit logging
+sudo systemctl enable auditd
+sudo systemctl start auditd
+
+# Configure audit rules for identity management
+sudo tee -a /etc/audit/rules.d/identity.rules << 'EOF'
+# Monitor user account changes
+-w /etc/passwd -p wa -k user_accounts
+-w /etc/group -p wa -k group_accounts
+-w /etc/shadow -p wa -k password_changes
+
+# Monitor FreeIPA logs
+-w /var/log/dirsrv -p wa -k directory_service
+-w /var/log/krb5kdc.log -p wa -k kerberos_auth
+EOF
+
+# Restart audit service
+sudo systemctl restart auditd
+Step 2: Create audit report script
+
+# Create audit reporting script
+cat > /tmp/generate_audit_report.sh << 'EOF'
+#!/bin/bash
+
+echo "Identity Management Audit Report"
+echo "==============================="
+echo "Generated on: $(date)"
+echo ""
+
+echo "Recent User Account Changes:"
+echo "----------------------------"
+sudo ausearch -k user_accounts -ts recent 2>/dev/null | head -10
+
+echo ""
+echo "Recent Authentication Events:"
+echo "-----------------------------"
+sudo ausearch -k kerberos_auth -ts recent 2>/dev/null | head -10
+
+echo ""
+echo "Current Active Users:"
+echo "--------------------"
+ipa user-find --all | grep "User login" | wc -l
+echo "Total users in directory"
+
+echo ""
+echo "Current Groups:"
+echo "--------------"
+ipa group-find | grep "Group name" | wc -l
+echo "Total groups in directory"
+EOF
+
+chmod +x /tmp/generate_audit_report.sh
+Task 5: Testing and Validation
+Subtask 5.1: Comprehensive System Testing
+Step 1: Create comprehensive test suite
+
+# Create master test script
+cat > /tmp/comprehensive_test.sh << 'EOF'
+#!/bin/bash
+
+echo "Comprehensive Identity Management Test Suite"
+echo "==========================================="
+
+# Test 1: Directory Service Status
+echo "Test 1: Directory Service Status"
+systemctl is-active ipa && echo "✓ FreeIPA service is running" || echo "✗ FreeIPA service is not running"
+
+# Test 2: User Authentication
+echo ""
+echo "Test 2: User Authentication Test"
+echo "admin" | kinit admin 2>/dev/null && echo "✓ Admin authentication successful" || echo "✗ Admin authentication failed"
+
+# Test 3: User Management
+echo ""
+echo "Test 3: User Management Test"
+ipa user-find jsmith >/dev/null 2>&1 && echo "✓ User jsmith exists" || echo "✗ User jsmith not found"
+
+# Test 4: Group Management
+echo ""
+echo "Test 4: Group Management Test"
+ipa group-find it-department >/dev/null 2>&1 && echo "✓ IT department group exists" || echo "✗ IT department group not found"
+
+# Test 5: OTP Token Configuration
+echo ""
+echo "Test 5: OTP Token Test"
+ipa otptoken-find >/dev/null 2>&1 && echo "✓ OTP tokens configured" || echo "✗ No OTP tokens found"
+
+# Test 6: Audit Logging
+echo ""
+echo "Test 6: Audit Logging Test"
+systemctl is-active auditd && echo "✓ Audit service is running" || echo "✗ Audit service is not running"
+
+echo ""
+echo "Test Suite Completed!"
+EOF
+
+chmod +x /tmp/comprehensive_test.sh
+/tmp/comprehensive_test.sh
+Subtask 5.2: Performance and Load Testing
+Step 1: Create performance test script
+
+# Create performance test script
+cat > /tmp/performance_test.sh << 'EOF'
+#!/bin/bash
+
+echo "Identity Management Performance Test"
+echo "==================================="
+
+# Test authentication performance
+echo "Testing authentication performance..."
+start_time=$(date +%s.%N)
+
+for i in {1..10}; do
+    echo "admin" | kinit admin 2>/dev/null
+    kdestroy 2>/dev/null
+done
+
+end_time=$(date +%s.%N)
+duration=$(echo "$end_time - $start_time" | bc)
+avg_time=$(echo "scale=3; $duration / 10" | bc)
+
+echo "Average authentication time: ${avg_time} seconds"
+
+# Test user lookup performance
+echo ""
+echo "Testing user lookup performance..."
+start_time=$(date +%s.%N)
+
+for i in {1..5}; do
+    ipa user-find >/dev/null 2>&1
+done
+
+end_time=$(date +%s.%N)
+duration=$(echo "$end_time - $start_time" | bc)
+avg_time=$(echo "scale=3; $duration / 5" | bc)
+
+echo "Average user lookup time: ${avg_time} seconds"
+
+echo ""
+echo "Performance testing completed!"
+EOF
+
+chmod +x /tmp/performance_test.sh
+/tmp/performance_test.sh
+Troubleshooting Common Issues
+Common Issue 1: FreeIPA Installation Fails
+Problem: FreeIPA server installation fails with DNS errors
+
+Solution:
+
+# Check DNS configuration
+nslookup $(hostname -f)
+
+# Verify hostname resolution
+ping $(hostname -f)
+
+# Fix DNS if needed
+sudo systemctl restart systemd-resolved
+Common Issue 2: User Authentication Fails
+Problem: Users cannot authenticate with kinit
+
+Solution:
+
+# Check Kerberos configuration
+klist -k /etc/krb5.keytab
+
+# Verify time synchronization
+sudo ntpdate -s time.nist.gov
+
+# Check service status
+sudo systemctl status krb5kdc
+Common Issue 3: OTP Token Issues
+Problem: OTP tokens not working properly
+
+Solution:
+
+# Verify OTP configuration
+ipa otptoken-find --all
+
+# Check time synchronization (critical for TOTP)
+timedatectl status
+
+# Regenerate token if needed
+ipa otptoken-del <token-id>
+ipa otptoken-add --owner=<username>
+Lab Validation Checklist
+Before completing the lab, verify the following:
+
+ FreeIPA server is installed and running
+ At least 6 users are created across different departments
+ 4 groups are configured (IT, HR, Finance, Administrators)
+ Role-based access control is implemented
+ OTP tokens are configured for at least one user
+ Multi-factor authentication is enabled
+ Audit logging is configured and active
+ All test scripts execute successfully
+ Password policies are enforced
+ Account lockout policies are configured
+Conclusion
+In this comprehensive lab, you have successfully:
+
+Accomplished Core Objectives: • Set up a complete identity management system using FreeIPA as an open-source alternative to Azure Active Directory • Created and managed users and groups with proper organizational structure • Implemented Multi-Factor Authentication using OTP tokens for enhanced security • Configured role-based access control and permission management • Set up audit logging and monitoring for security compliance
+
+Key Skills Developed: • Understanding of enterprise identity management principles • Hands-on experience with directory services and LDAP • Implementation of security best practices including MFA • User and group lifecycle management • Security policy configuration and enforcement
+
+Real-World Applications: This lab simulates real enterprise scenarios where organizations need to manage hundreds or thousands of user accounts securely. The skills learned here directly apply to: • Corporate IT environments using Azure AD, Active Directory, or other identity providers • Security compliance requirements in regulated industries • DevOps and cloud infrastructure management • Cybersecurity roles focusing on identity and access management
+
+Why This Matters: Identity management is the foundation of modern cybersecurity. With cyber attacks increasingly targeting user credentials, proper identity management with MFA can prevent up to 99.9% of automated attacks. The open-source tools used in this lab provide the same core functionality as expensive commercial solutions, making these skills valuable for organizations of all sizes.
+
+You now have practical experience with enterprise-grade identity management that will serve as a strong foundation for advanced security and cloud computing topics.
