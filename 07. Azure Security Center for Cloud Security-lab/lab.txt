@@ -1,0 +1,284 @@
+Lab 7: Azure Security Center for Cloud Security
+Objectives
+By the end of this lab, students will be able to:
+
+• Navigate and understand the Azure Security Center dashboard and its key features • Implement security recommendations to improve cloud security posture • Configure Just-In-Time (JIT) VM access to enhance virtual machine security • Analyze and respond to security alerts effectively • Understand the importance of continuous security monitoring in cloud environments • Apply security best practices using open-source tools and Azure native services
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line operations • Basic knowledge of virtual machines and networking • Understanding of security fundamentals (authentication, authorization, encryption) • Access to a web browser with internet connectivity • Basic familiarity with Azure portal navigation
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines for this lab. Simply click Start Lab to begin - no need to build your own VM or set up complex infrastructure.
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines
+Al Nafi has prepared a complete lab environment for you that includes:
+
+• Pre-configured Azure subscription with Security Center enabled • Linux-based virtual machines ready for security testing • Network security groups and firewall rules pre-configured • Sample applications and services for security analysis • All necessary permissions and access rights configured
+
+Simply click the Start Lab button to access your environment. Your credentials and connection details will be provided automatically.
+
+Task 1: Navigate Azure Security Center and Implement Security Recommendations
+Subtask 1.1: Access Azure Security Center
+Open your web browser and navigate to the Azure portal provided in your lab environment
+
+Sign in using the credentials provided by Al Nafi
+
+Locate Security Center in the Azure portal:
+
+Click on the search bar at the top of the portal
+Type "Security Center" or "Microsoft Defender for Cloud"
+Select Microsoft Defender for Cloud from the results
+Explore the main dashboard and familiarize yourself with the layout:
+
+Secure Score: Shows your overall security posture
+Recommendations: Lists security improvements needed
+Security Alerts: Displays active security incidents
+Inventory: Shows all your resources and their security status
+Subtask 1.2: Understand the Secure Score
+Click on Secure Score in the left navigation menu
+
+Review your current score and understand what it means:
+
+The score is calculated based on security recommendations
+Higher scores indicate better security posture
+Each recommendation has a potential score improvement value
+Examine the score breakdown:
+
+Click on different categories to see detailed breakdowns
+Note which areas need the most attention
+Understand how implementing recommendations will improve your score
+Subtask 1.3: Review and Implement Security Recommendations
+Navigate to Recommendations in the left menu
+
+Filter recommendations by severity:
+
+Click on the Severity filter
+Start with High severity recommendations
+Review each recommendation carefully
+Implement a network security recommendation:
+
+Look for recommendations related to Network Security Groups
+Click on a recommendation such as "Network Security Groups should restrict access"
+Follow these steps to implement:
+# Connect to your Linux VM using the provided credentials
+ssh azureuser@<your-vm-ip>
+
+# Check current network security group rules
+az network nsg list --output table
+
+# View specific NSG rules
+az network nsg rule list --resource-group <resource-group-name> --nsg-name <nsg-name> --output table
+Implement the recommendation through Azure portal:
+
+Click Take action on the recommendation
+Select the affected resource
+Click Fix or Remediate
+Follow the guided steps to apply the security fix
+Implement a VM security recommendation:
+
+Look for recommendations about Virtual Machine security
+Common recommendations include:
+Enable disk encryption
+Install endpoint protection
+Apply system updates
+Apply system updates (if recommended):
+
+# Update package lists
+sudo apt update
+
+# Upgrade installed packages
+sudo apt upgrade -y
+
+# Install security updates specifically
+sudo apt install unattended-upgrades -y
+
+# Configure automatic security updates
+sudo dpkg-reconfigure -plow unattended-upgrades
+Subtask 1.4: Monitor Recommendation Implementation
+Track your progress:
+
+Return to the Recommendations page
+Notice how implemented recommendations change status
+Check if your Secure Score has improved
+Document your changes:
+
+Create a simple log of what you implemented
+Note the before and after security scores
+Record any challenges you encountered
+Task 2: Set Up Just-In-Time VM Access and Analyze Security Alerts
+Subtask 2.1: Configure Just-In-Time (JIT) VM Access
+Navigate to Just-in-time VM access:
+
+In Security Center, find Cloud Security in the left menu
+Click on Just-in-time VM access
+Review the list of VMs that can be configured for JIT
+Enable JIT on a virtual machine:
+
+Select a VM from the list
+Click Enable JIT on VM
+Configure the JIT policy:
+{
+  "ports": [
+    {
+      "number": 22,
+      "protocol": "TCP",
+      "allowedSourceAddressPrefix": "*",
+      "maxRequestAccessDuration": "PT3H"
+    },
+    {
+      "number": 3389,
+      "protocol": "TCP",
+      "allowedSourceAddressPrefix": "*",
+      "maxRequestAccessDuration": "PT3H"
+    }
+  ]
+}
+Customize JIT settings:
+Port 22 (SSH): Set maximum access duration to 3 hours
+Port 3389 (RDP): Configure if Windows VM is available
+Source IP: Restrict to specific IP ranges if needed
+Click Save to apply the configuration
+Subtask 2.2: Request JIT Access
+Request access to your VM:
+
+Go back to Just-in-time VM access
+Find your configured VM
+Click Request access
+Fill out the access request:
+
+Select the ports you need (typically port 22 for SSH)
+Set the time range for access
+Provide a business justification
+Click Open ports
+Test the JIT access:
+
+# Try to connect to your VM
+ssh azureuser@<your-vm-ip>
+
+# If successful, you should be able to connect
+# The connection will be automatically blocked after the time expires
+Subtask 2.3: Generate and Analyze Security Alerts
+Create a test security alert by simulating suspicious activity:
+# Connect to your VM
+ssh azureuser@<your-vm-ip>
+
+# Simulate suspicious login attempts (this will trigger alerts)
+for i in {1..10}; do
+    ssh invalid-user@localhost 2>/dev/null
+    sleep 2
+done
+
+# Simulate file system scanning (potential malware behavior)
+find / -name "*.conf" -type f 2>/dev/null | head -20
+
+# Create unusual network activity
+nmap -sS localhost 2>/dev/null || echo "nmap not installed"
+Generate application-level alerts:
+# Install and run a simple web server
+sudo apt install apache2 -y
+sudo systemctl start apache2
+
+# Simulate web attacks (this may trigger security alerts)
+curl -X POST http://localhost/admin
+curl -X GET "http://localhost/index.php?id=1' OR '1'='1"
+curl -X GET "http://localhost/../../../etc/passwd"
+Subtask 2.4: Analyze Security Alerts in Security Center
+Navigate to Security Alerts:
+
+In Security Center, click on Security alerts
+Wait a few minutes for alerts to appear (alerts may take 5-15 minutes to show)
+Review alert details:
+
+Click on any security alert that appears
+Examine the alert information:
+Severity level
+Description of the threat
+Affected resources
+Recommended actions
+Investigate an alert:
+
+Click View full details on a high-priority alert
+Review the Attack timeline
+Check Related events
+Examine Recommended steps
+Respond to security alerts:
+
+# Check system logs for suspicious activity
+sudo tail -f /var/log/auth.log
+
+# Review Apache access logs if web server alerts occurred
+sudo tail -f /var/log/apache2/access.log
+
+# Check for unusual processes
+ps aux | grep -E "(nmap|scan|attack)"
+
+# Review network connections
+netstat -tulpn | grep LISTEN
+Subtask 2.5: Create Alert Response Procedures
+Document your alert response:
+
+Create a simple incident response checklist
+Include steps for different types of alerts
+Note contact information for escalation
+Test alert suppression (for false positives):
+
+Select a low-priority alert
+Click Suppress similar alerts
+Configure suppression rules appropriately
+Set up alert notifications:
+
+Go to Email notifications in Security Center settings
+Configure email addresses for security alerts
+Set notification preferences for different severity levels
+Troubleshooting Common Issues
+Issue 1: Security Center Not Loading
+Solution:
+
+Ensure you have proper permissions in the Azure subscription
+Try refreshing the browser or clearing cache
+Verify your subscription has Security Center enabled
+Issue 2: JIT Access Request Fails
+Solution:
+
+# Check if the VM is running
+az vm show --resource-group <rg-name> --name <vm-name> --query "powerState"
+
+# Verify network security group configuration
+az network nsg rule list --resource-group <rg-name> --nsg-name <nsg-name>
+Issue 3: No Security Alerts Appearing
+Solution:
+
+Wait longer (alerts can take 15-30 minutes to appear)
+Ensure the activities you performed were actually suspicious
+Check if Security Center has proper monitoring enabled
+Issue 4: SSH Connection Issues
+Solution:
+
+# Check if SSH service is running on the VM
+sudo systemctl status ssh
+
+# Verify firewall settings
+sudo ufw status
+
+# Check SSH configuration
+sudo nano /etc/ssh/sshd_config
+Best Practices and Security Tips
+Security Center Best Practices
+• Regularly review your Secure Score and work to improve it • Prioritize high-severity recommendations first • Enable automatic provisioning of security agents • Configure continuous export of security data for long-term analysis
+
+JIT Access Best Practices
+• Use shortest possible access duration • Restrict source IPs to known safe addresses when possible • Regularly audit JIT access requests and approvals • Document business justification for all access requests
+
+Alert Management Best Practices
+• Respond promptly to high-severity alerts • Create playbooks for common alert types • Regularly tune alert rules to reduce false positives • Maintain incident response documentation
+
+Conclusion
+In this lab, you have successfully:
+
+• Navigated Azure Security Center and understood its key components including Secure Score, Recommendations, and Security Alerts • Implemented security recommendations to improve your cloud security posture, including network security group configurations and system updates • Configured Just-In-Time VM access to enhance virtual machine security by limiting administrative access to specific time windows • Generated and analyzed security alerts by simulating suspicious activities and learning how to respond appropriately • Applied security best practices using both Azure native tools and open-source utilities
+
+Why This Matters: Cloud security is critical in today's digital landscape. Azure Security Center provides a centralized way to monitor, assess, and improve your security posture. Just-In-Time access reduces the attack surface by limiting when administrative ports are open, while security alerts help you detect and respond to threats quickly. These skills are essential for anyone working with cloud infrastructure, as they help prevent data breaches, ensure compliance, and maintain customer trust.
+
+The hands-on experience you gained with security recommendations, JIT access, and alert analysis will serve as a foundation for more advanced cloud security practices. Remember that security is an ongoing process, not a one-time setup, and regular monitoring and improvement are key to maintaining a strong security posture in the cloud.
