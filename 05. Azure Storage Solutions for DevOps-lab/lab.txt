@@ -1,0 +1,373 @@
+Lab 5: Azure Storage Solutions for DevOps
+Objectives
+By the end of this lab, students will be able to:
+
+• Create and configure Azure Blob Storage containers for storing unstructured data • Implement Azure File Shares for shared data access across multiple systems • Integrate managed disks with Azure Virtual Machines for persistent storage • Understand the differences between various Azure storage types and their use cases • Use Azure CLI and open-source tools to manage storage resources • Apply storage solutions in real-world DevOps scenarios
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line interface • Basic knowledge of file systems and storage concepts • Understanding of Azure resource groups and subscriptions • Completion of previous Azure fundamentals labs (recommended)
+
+Note: Al Nafi provides pre-configured Linux-based cloud machines with Azure CLI already installed. Simply click "Start Lab" to begin - no need to build your own VM or install additional software.
+
+Lab Environment Setup
+Your Al Nafi cloud machine comes pre-configured with: • Azure CLI (latest version) • Linux Ubuntu environment • All necessary permissions for Azure resource creation • Text editors (nano, vim)
+
+Task 1: Create and Configure Azure Blob Storage
+Subtask 1.1: Set Up Resource Group and Storage Account
+First, let's create a resource group to organize our storage resources.
+
+# Login to Azure (if not already logged in)
+az login
+
+# Set variables for easier management
+RESOURCE_GROUP="rg-storage-lab"
+LOCATION="eastus"
+STORAGE_ACCOUNT="storagelab$(date +%s)"
+
+# Create resource group
+az group create \
+    --name $RESOURCE_GROUP \
+    --location $LOCATION
+
+echo "Resource group created: $RESOURCE_GROUP"
+Now, create a storage account that will host our blob storage:
+
+# Create storage account
+az storage account create \
+    --name $STORAGE_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --location $LOCATION \
+    --sku Standard_LRS \
+    --kind StorageV2
+
+echo "Storage account created: $STORAGE_ACCOUNT"
+Subtask 1.2: Configure Blob Storage Container
+Let's create a container within our storage account to organize our blobs:
+
+# Get storage account key
+STORAGE_KEY=$(az storage account keys list \
+    --resource-group $RESOURCE_GROUP \
+    --account-name $STORAGE_ACCOUNT \
+    --query '[0].value' \
+    --output tsv)
+
+# Create a container for our application data
+CONTAINER_NAME="app-data"
+
+az storage container create \
+    --name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY \
+    --public-access off
+
+echo "Container created: $CONTAINER_NAME"
+Subtask 1.3: Upload and Manage Blob Data
+Create sample files and upload them to demonstrate blob storage functionality:
+
+# Create sample files
+mkdir -p ~/lab-files
+echo "This is application configuration data" > ~/lab-files/app-config.txt
+echo "Log entry 1: Application started" > ~/lab-files/app.log
+echo "User data backup - $(date)" > ~/lab-files/backup.txt
+
+# Upload files to blob storage
+az storage blob upload \
+    --file ~/lab-files/app-config.txt \
+    --name config/app-config.txt \
+    --container-name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+az storage blob upload \
+    --file ~/lab-files/app.log \
+    --name logs/app.log \
+    --container-name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+az storage blob upload \
+    --file ~/lab-files/backup.txt \
+    --name backups/backup.txt \
+    --container-name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+echo "Files uploaded to blob storage"
+Subtask 1.4: List and Download Blobs
+Verify your uploads and practice downloading files:
+
+# List all blobs in the container
+echo "Listing all blobs in container:"
+az storage blob list \
+    --container-name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY \
+    --output table
+
+# Download a specific blob
+mkdir -p ~/downloads
+az storage blob download \
+    --name config/app-config.txt \
+    --file ~/downloads/downloaded-config.txt \
+    --container-name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+echo "File downloaded to ~/downloads/"
+cat ~/downloads/downloaded-config.txt
+Task 2: Implement Azure File Shares and Integrate Managed Disks
+Subtask 2.1: Create Azure File Share
+Azure File Shares provide SMB-based shared storage that can be mounted on multiple systems:
+
+# Create a file share
+FILE_SHARE_NAME="shared-data"
+
+az storage share create \
+    --name $FILE_SHARE_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY \
+    --quota 100
+
+echo "File share created: $FILE_SHARE_NAME"
+Subtask 2.2: Upload Files to File Share
+Create and upload files to the file share:
+
+# Create sample shared files
+echo "Shared configuration for all servers" > ~/lab-files/shared-config.conf
+echo "Team collaboration document" > ~/lab-files/team-doc.txt
+echo "#!/bin/bash\necho 'Shared deployment script'" > ~/lab-files/deploy.sh
+
+# Upload files to file share
+az storage file upload \
+    --share-name $FILE_SHARE_NAME \
+    --source ~/lab-files/shared-config.conf \
+    --path shared-config.conf \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+az storage file upload \
+    --share-name $FILE_SHARE_NAME \
+    --source ~/lab-files/team-doc.txt \
+    --path team-doc.txt \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+az storage file upload \
+    --share-name $FILE_SHARE_NAME \
+    --source ~/lab-files/deploy.sh \
+    --path scripts/deploy.sh \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+echo "Files uploaded to file share"
+Subtask 2.3: Create Virtual Machine with Managed Disk
+Now let's create a VM with managed disks to demonstrate storage integration:
+
+# Set VM variables
+VM_NAME="storage-vm"
+VM_SIZE="Standard_B1s"
+ADMIN_USERNAME="azureuser"
+
+# Create VM with managed disk
+az vm create \
+    --resource-group $RESOURCE_GROUP \
+    --name $VM_NAME \
+    --image Ubuntu2204 \
+    --size $VM_SIZE \
+    --admin-username $ADMIN_USERNAME \
+    --generate-ssh-keys \
+    --storage-sku Standard_LRS
+
+echo "VM created with managed disk: $VM_NAME"
+Subtask 2.4: Add Additional Managed Disk
+Add an extra data disk to the VM for additional storage:
+
+# Create and attach additional managed disk
+DISK_NAME="data-disk-01"
+DISK_SIZE="32"
+
+az vm disk attach \
+    --resource-group $RESOURCE_GROUP \
+    --vm-name $VM_NAME \
+    --name $DISK_NAME \
+    --new \
+    --size-gb $DISK_SIZE \
+    --sku Standard_LRS
+
+echo "Additional managed disk attached: $DISK_NAME"
+Subtask 2.5: Mount File Share on Virtual Machine
+Connect to the VM and mount the Azure File Share:
+
+# Get VM public IP
+VM_IP=$(az vm show \
+    --resource-group $RESOURCE_GROUP \
+    --name $VM_NAME \
+    --show-details \
+    --query publicIps \
+    --output tsv)
+
+echo "VM Public IP: $VM_IP"
+
+# Create script to mount file share on VM
+cat > mount-fileshare.sh << 'EOF'
+#!/bin/bash
+
+# Install cifs-utils for SMB mounting
+sudo apt-get update
+sudo apt-get install -y cifs-utils
+
+# Create mount point
+sudo mkdir -p /mnt/azurefileshare
+
+# Mount the file share (replace variables with actual values)
+sudo mount -t cifs //$STORAGE_ACCOUNT.file.core.windows.net/$FILE_SHARE_NAME /mnt/azurefileshare -o vers=3.0,username=$STORAGE_ACCOUNT,password=$STORAGE_KEY,dir_mode=0777,file_mode=0777,serverino
+
+# Verify mount
+ls -la /mnt/azurefileshare/
+
+echo "File share mounted successfully"
+EOF
+
+# Make script executable
+chmod +x mount-fileshare.sh
+
+echo "Mount script created. To execute on VM:"
+echo "1. SSH to VM: ssh $ADMIN_USERNAME@$VM_IP"
+echo "2. Copy and run the mount commands manually with your storage credentials"
+Subtask 2.6: Verify Storage Configuration
+Let's verify all our storage components are working correctly:
+
+# List storage account details
+echo "=== Storage Account Summary ==="
+az storage account show \
+    --name $STORAGE_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --query '{name:name, location:location, sku:sku.name, kind:kind}' \
+    --output table
+
+# List containers
+echo "=== Blob Containers ==="
+az storage container list \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY \
+    --output table
+
+# List file shares
+echo "=== File Shares ==="
+az storage share list \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY \
+    --output table
+
+# List VM disks
+echo "=== VM Managed Disks ==="
+az vm show \
+    --resource-group $RESOURCE_GROUP \
+    --name $VM_NAME \
+    --query 'storageProfile.{osDisk:osDisk.name, dataDisks:dataDisks[].name}' \
+    --output table
+Practical DevOps Scenarios
+Scenario 1: Application Deployment with Shared Configuration
+Create a practical example of using file shares for deployment:
+
+# Create deployment configuration
+cat > ~/lab-files/app-deployment.yaml << 'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  database_url: "postgresql://db.example.com:5432/myapp"
+  redis_url: "redis://cache.example.com:6379"
+  log_level: "INFO"
+EOF
+
+# Upload deployment config to file share
+az storage file upload \
+    --share-name $FILE_SHARE_NAME \
+    --source ~/lab-files/app-deployment.yaml \
+    --path configs/app-deployment.yaml \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+echo "Deployment configuration uploaded to shared storage"
+Scenario 2: Log Aggregation with Blob Storage
+Demonstrate log storage and retrieval:
+
+# Create sample log files
+for i in {1..3}; do
+    echo "$(date): Server-$i - Application started successfully" > ~/lab-files/server-$i.log
+    echo "$(date): Server-$i - Processing user requests" >> ~/lab-files/server-$i.log
+    echo "$(date): Server-$i - Database connection established" >> ~/lab-files/server-$i.log
+    
+    # Upload to blob storage
+    az storage blob upload \
+        --file ~/lab-files/server-$i.log \
+        --name logs/$(date +%Y/%m/%d)/server-$i.log \
+        --container-name $CONTAINER_NAME \
+        --account-name $STORAGE_ACCOUNT \
+        --account-key $STORAGE_KEY
+done
+
+echo "Log files uploaded with date-based organization"
+Troubleshooting Common Issues
+Issue 1: Storage Account Name Already Exists
+If you encounter a storage account name conflict:
+
+# Generate a more unique name
+STORAGE_ACCOUNT="storagelab$(whoami)$(date +%s)"
+echo "Using storage account name: $STORAGE_ACCOUNT"
+Issue 2: Permission Denied on File Share Mount
+If mounting fails, check:
+
+# Verify storage account key
+az storage account keys list \
+    --resource-group $RESOURCE_GROUP \
+    --account-name $STORAGE_ACCOUNT \
+    --output table
+
+# Ensure cifs-utils is installed on the target system
+sudo apt-get install -y cifs-utils
+Issue 3: Blob Upload Failures
+For upload issues, verify:
+
+# Check container exists
+az storage container exists \
+    --name $CONTAINER_NAME \
+    --account-name $STORAGE_ACCOUNT \
+    --account-key $STORAGE_KEY
+
+# Verify file exists locally
+ls -la ~/lab-files/
+Cleanup Resources
+To avoid ongoing charges, clean up the resources when done:
+
+# Delete the entire resource group (this removes all resources)
+az group delete \
+    --name $RESOURCE_GROUP \
+    --yes \
+    --no-wait
+
+echo "Cleanup initiated. Resources will be deleted in the background."
+Conclusion
+In this lab, you have successfully:
+
+• Created and configured Azure Blob Storage - You learned how to create storage accounts, containers, and manage unstructured data like application files, logs, and backups. This is essential for DevOps scenarios where you need to store build artifacts, deployment packages, and application data.
+
+• Implemented Azure File Shares - You set up shared storage that can be accessed by multiple systems simultaneously, perfect for sharing configuration files, deployment scripts, and collaborative documents across your development and operations teams.
+
+• Integrated managed disks with Azure VMs - You created virtual machines with persistent storage, understanding how managed disks provide reliable, high-performance storage for your applications and databases.
+
+• Applied real-world DevOps scenarios - Through practical examples like log aggregation and shared configuration management, you've seen how these storage solutions solve common challenges in modern software development and deployment pipelines.
+
+Why This Matters: Storage is the foundation of any robust DevOps infrastructure. Blob storage enables you to build scalable applications that can handle massive amounts of unstructured data. File shares facilitate team collaboration and consistent deployments across environments. Managed disks ensure your critical applications have reliable, persistent storage that can scale with your needs.
+
+These skills are directly applicable to real-world scenarios such as:
+
+Building CI/CD pipelines that store build artifacts
+Creating disaster recovery solutions with automated backups
+Implementing microservices architectures with shared configuration
+Managing application logs and monitoring data at scale
+You now have hands-on experience with Azure's core storage services using open-source tools and command-line interfaces, preparing you for advanced DevOps practices and cloud-native application development.
