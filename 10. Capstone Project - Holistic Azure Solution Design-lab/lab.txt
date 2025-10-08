@@ -1,0 +1,854 @@
+Lab 10: Capstone Project - Holistic Azure Solution Design
+Objectives
+By the end of this lab, students will be able to:
+
+• Design a comprehensive multi-tier application infrastructure using Azure services • Implement security best practices across all application layers • Configure monitoring and alerting systems for application health • Ensure compliance with industry standards and regulations • Present a complete solution architecture with proper documentation • Understand the integration between different Azure services in a real-world scenario
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line operations • Knowledge of web application architecture (frontend, backend, database) • Understanding of networking fundamentals • Basic knowledge of containerization concepts • Previous experience with Azure CLI or willingness to learn
+
+Ready-to-Use Cloud Machines
+Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. The machine comes with:
+
+• Azure CLI pre-installed and configured • Docker and container tools • Text editors (nano, vim) • Git for version control • All necessary development tools
+
+No need to build your own VM or install additional software.
+
+Lab Environment Setup
+Task 1: Initial Environment Preparation
+Subtask 1.1: Verify Azure CLI Installation
+First, let's verify that Azure CLI is properly installed and configured:
+
+# Check Azure CLI version
+az --version
+
+# Login to Azure (follow the prompts)
+az login
+
+# Set your subscription (replace with your subscription ID)
+az account set --subscription "your-subscription-id"
+
+# Verify current subscription
+az account show --output table
+Subtask 1.2: Create Resource Group
+Create a dedicated resource group for our capstone project:
+
+# Create resource group
+az group create \
+    --name "rg-capstone-project" \
+    --location "East US"
+
+# Verify resource group creation
+az group show --name "rg-capstone-project" --output table
+Subtask 1.3: Set Environment Variables
+Set up environment variables for consistent naming:
+
+# Set environment variables
+export RESOURCE_GROUP="rg-capstone-project"
+export LOCATION="eastus"
+export APP_NAME="capstone-app"
+export UNIQUE_SUFFIX=$(date +%s | tail -c 6)
+
+# Verify variables
+echo "Resource Group: $RESOURCE_GROUP"
+echo "Location: $LOCATION"
+echo "App Name: $APP_NAME"
+echo "Unique Suffix: $UNIQUE_SUFFIX"
+Task 2: Design Multi-Tier Application Infrastructure
+Subtask 2.1: Create Virtual Network Infrastructure
+Design and implement the network foundation:
+
+# Create virtual network
+az network vnet create \
+    --resource-group $RESOURCE_GROUP \
+    --name "vnet-$APP_NAME" \
+    --address-prefix 10.0.0.0/16 \
+    --location $LOCATION
+
+# Create frontend subnet
+az network vnet subnet create \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-frontend" \
+    --address-prefix 10.0.1.0/24
+
+# Create backend subnet
+az network vnet subnet create \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-backend" \
+    --address-prefix 10.0.2.0/24
+
+# Create database subnet
+az network vnet subnet create \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-database" \
+    --address-prefix 10.0.3.0/24
+Subtask 2.2: Create Network Security Groups
+Implement network-level security:
+
+# Create NSG for frontend
+az network nsg create \
+    --resource-group $RESOURCE_GROUP \
+    --name "nsg-frontend"
+
+# Allow HTTP and HTTPS traffic to frontend
+az network nsg rule create \
+    --resource-group $RESOURCE_GROUP \
+    --nsg-name "nsg-frontend" \
+    --name "AllowHTTP" \
+    --protocol tcp \
+    --priority 1000 \
+    --destination-port-range 80 \
+    --access allow
+
+az network nsg rule create \
+    --resource-group $RESOURCE_GROUP \
+    --nsg-name "nsg-frontend" \
+    --name "AllowHTTPS" \
+    --protocol tcp \
+    --priority 1001 \
+    --destination-port-range 443 \
+    --access allow
+
+# Create NSG for backend
+az network nsg create \
+    --resource-group $RESOURCE_GROUP \
+    --name "nsg-backend"
+
+# Allow API traffic from frontend subnet only
+az network nsg rule create \
+    --resource-group $RESOURCE_GROUP \
+    --nsg-name "nsg-backend" \
+    --name "AllowAPIFromFrontend" \
+    --protocol tcp \
+    --priority 1000 \
+    --destination-port-range 8080 \
+    --source-address-prefix 10.0.1.0/24 \
+    --access allow
+
+# Create NSG for database
+az network nsg create \
+    --resource-group $RESOURCE_GROUP \
+    --name "nsg-database"
+
+# Allow database traffic from backend subnet only
+az network nsg rule create \
+    --resource-group $RESOURCE_GROUP \
+    --nsg-name "nsg-database" \
+    --name "AllowDBFromBackend" \
+    --protocol tcp \
+    --priority 1000 \
+    --destination-port-range 5432 \
+    --source-address-prefix 10.0.2.0/24 \
+    --access allow
+Subtask 2.3: Associate NSGs with Subnets
+# Associate NSGs with respective subnets
+az network vnet subnet update \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-frontend" \
+    --network-security-group "nsg-frontend"
+
+az network vnet subnet update \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-backend" \
+    --network-security-group "nsg-backend"
+
+az network vnet subnet update \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-database" \
+    --network-security-group "nsg-database"
+Subtask 2.4: Create Application Gateway (Load Balancer)
+# Create public IP for Application Gateway
+az network public-ip create \
+    --resource-group $RESOURCE_GROUP \
+    --name "pip-appgateway" \
+    --allocation-method Static \
+    --sku Standard
+
+# Create Application Gateway subnet
+az network vnet subnet create \
+    --resource-group $RESOURCE_GROUP \
+    --vnet-name "vnet-$APP_NAME" \
+    --name "subnet-appgateway" \
+    --address-prefix 10.0.4.0/24
+
+# Create Application Gateway
+az network application-gateway create \
+    --resource-group $RESOURCE_GROUP \
+    --name "appgw-$APP_NAME" \
+    --location $LOCATION \
+    --vnet-name "vnet-$APP_NAME" \
+    --subnet "subnet-appgateway" \
+    --capacity 2 \
+    --sku Standard_v2 \
+    --public-ip-address "pip-appgateway" \
+    --frontend-port 80
+Subtask 2.5: Create Container Registry
+# Create Azure Container Registry
+az acr create \
+    --resource-group $RESOURCE_GROUP \
+    --name "acr${APP_NAME}${UNIQUE_SUFFIX}" \
+    --sku Basic \
+    --admin-enabled true
+
+# Get ACR login server
+ACR_LOGIN_SERVER=$(az acr show --name "acr${APP_NAME}${UNIQUE_SUFFIX}" --resource-group $RESOURCE_GROUP --query "loginServer" --output tsv)
+echo "ACR Login Server: $ACR_LOGIN_SERVER"
+Subtask 2.6: Create Container Instances for Application Tiers
+Create frontend container:
+
+# Create a simple HTML file for frontend
+cat > index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Capstone Project Frontend</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { background-color: #007acc; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; background-color: #f5f5f5; }
+        .api-status { margin: 20px 0; padding: 10px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Multi-Tier Application</h1>
+            <p>Capstone Project - Azure Solution</p>
+        </div>
+        <div class="content">
+            <h2>Frontend Tier</h2>
+            <p>This is the presentation layer of our multi-tier application.</p>
+            <div class="api-status">
+                <h3>Backend API Status</h3>
+                <p id="api-status">Checking...</p>
+            </div>
+            <div class="api-status">
+                <h3>Database Status</h3>
+                <p id="db-status">Checking...</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Simulate API calls
+        document.getElementById('api-status').innerHTML = 'Backend API: Connected ✓';
+        document.getElementById('db-status').innerHTML = 'Database: Connected ✓';
+    </script>
+</body>
+</html>
+EOF
+
+# Create Dockerfile for frontend
+cat > Dockerfile.frontend << 'EOF'
+FROM nginx:alpine
+COPY index.html /usr/share/nginx/html/
+EXPOSE 80
+EOF
+
+# Build and push frontend image
+docker build -f Dockerfile.frontend -t frontend-app .
+docker tag frontend-app $ACR_LOGIN_SERVER/frontend-app:v1
+
+# Login to ACR and push
+az acr login --name "acr${APP_NAME}${UNIQUE_SUFFIX}"
+docker push $ACR_LOGIN_SERVER/frontend-app:v1
+Create backend API:
+
+# Create a simple Python API
+cat > app.py << 'EOF'
+from flask import Flask, jsonify
+import os
+import psycopg2
+from datetime import datetime
+
+app = Flask(__name__)
+
+@app.route('/api/health')
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'backend-api'
+    })
+
+@app.route('/api/data')
+def get_data():
+    return jsonify({
+        'message': 'Data from backend API',
+        'timestamp': datetime.now().isoformat(),
+        'data': [
+            {'id': 1, 'name': 'Sample Data 1'},
+            {'id': 2, 'name': 'Sample Data 2'}
+        ]
+    })
+
+@app.route('/api/database')
+def database_status():
+    try:
+        # Simulate database connection check
+        return jsonify({
+            'database': 'connected',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'database': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+EOF
+
+# Create requirements.txt
+cat > requirements.txt << 'EOF'
+Flask==2.3.3
+psycopg2-binary==2.9.7
+EOF
+
+# Create Dockerfile for backend
+cat > Dockerfile.backend << 'EOF'
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY app.py .
+EXPOSE 8080
+CMD ["python", "app.py"]
+EOF
+
+# Build and push backend image
+docker build -f Dockerfile.backend -t backend-app .
+docker tag backend-app $ACR_LOGIN_SERVER/backend-app:v1
+docker push $ACR_LOGIN_SERVER/backend-app:v1
+Subtask 2.7: Create PostgreSQL Database
+# Create PostgreSQL server
+az postgres server create \
+    --resource-group $RESOURCE_GROUP \
+    --name "postgres-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --location $LOCATION \
+    --admin-user "dbadmin" \
+    --admin-password "SecurePass123!" \
+    --sku-name GP_Gen5_2 \
+    --version 11
+
+# Create database
+az postgres db create \
+    --resource-group $RESOURCE_GROUP \
+    --server-name "postgres-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name "appdb"
+
+# Configure firewall to allow Azure services
+az postgres server firewall-rule create \
+    --resource-group $RESOURCE_GROUP \
+    --server-name "postgres-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name "AllowAzureServices" \
+    --start-ip-address 0.0.0.0 \
+    --end-ip-address 0.0.0.0
+Subtask 2.8: Deploy Container Instances
+# Deploy frontend container
+az container create \
+    --resource-group $RESOURCE_GROUP \
+    --name "frontend-container" \
+    --image "$ACR_LOGIN_SERVER/frontend-app:v1" \
+    --registry-login-server $ACR_LOGIN_SERVER \
+    --registry-username $(az acr credential show --name "acr${APP_NAME}${UNIQUE_SUFFIX}" --query "username" --output tsv) \
+    --registry-password $(az acr credential show --name "acr${APP_NAME}${UNIQUE_SUFFIX}" --query "passwords[0].value" --output tsv) \
+    --dns-name-label "frontend-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --ports 80 \
+    --location $LOCATION
+
+# Deploy backend container
+az container create \
+    --resource-group $RESOURCE_GROUP \
+    --name "backend-container" \
+    --image "$ACR_LOGIN_SERVER/backend-app:v1" \
+    --registry-login-server $ACR_LOGIN_SERVER \
+    --registry-username $(az acr credential show --name "acr${APP_NAME}${UNIQUE_SUFFIX}" --query "username" --output tsv) \
+    --registry-password $(az acr credential show --name "acr${APP_NAME}${UNIQUE_SUFFIX}" --query "passwords[0].value" --output tsv) \
+    --dns-name-label "backend-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --ports 8080 \
+    --location $LOCATION
+Task 3: Implement Security Features
+Subtask 3.1: Create Key Vault for Secrets Management
+# Create Key Vault
+az keyvault create \
+    --resource-group $RESOURCE_GROUP \
+    --name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --location $LOCATION \
+    --enabled-for-disk-encryption true \
+    --enabled-for-deployment true \
+    --enabled-for-template-deployment true
+
+# Store database connection string
+DB_CONNECTION_STRING="postgresql://dbadmin:SecurePass123!@postgres-${APP_NAME}-${UNIQUE_SUFFIX}.postgres.database.azure.com:5432/appdb"
+
+az keyvault secret set \
+    --vault-name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name "database-connection-string" \
+    --value "$DB_CONNECTION_STRING"
+
+# Store API keys
+az keyvault secret set \
+    --vault-name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name "api-key" \
+    --value "your-secure-api-key-here"
+Subtask 3.2: Configure SSL/TLS Certificate
+# Create a self-signed certificate for demonstration
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=capstone-app.com"
+
+# Store certificate in Key Vault
+az keyvault certificate import \
+    --vault-name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name "ssl-certificate" \
+    --file cert.pem
+Subtask 3.3: Create Managed Identity
+# Create user-assigned managed identity
+az identity create \
+    --resource-group $RESOURCE_GROUP \
+    --name "identity-${APP_NAME}"
+
+# Get identity details
+IDENTITY_ID=$(az identity show --resource-group $RESOURCE_GROUP --name "identity-${APP_NAME}" --query "id" --output tsv)
+IDENTITY_CLIENT_ID=$(az identity show --resource-group $RESOURCE_GROUP --name "identity-${APP_NAME}" --query "clientId" --output tsv)
+
+echo "Identity ID: $IDENTITY_ID"
+echo "Identity Client ID: $IDENTITY_CLIENT_ID"
+Subtask 3.4: Configure Key Vault Access Policies
+# Grant managed identity access to Key Vault
+az keyvault set-policy \
+    --name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --object-id $(az identity show --resource-group $RESOURCE_GROUP --name "identity-${APP_NAME}" --query "principalId" --output tsv) \
+    --secret-permissions get list
+Task 4: Configure Monitoring and Alerting
+Subtask 4.1: Create Log Analytics Workspace
+# Create Log Analytics workspace
+az monitor log-analytics workspace create \
+    --resource-group $RESOURCE_GROUP \
+    --workspace-name "law-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --location $LOCATION
+
+# Get workspace ID
+WORKSPACE_ID=$(az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name "law-${APP_NAME}-${UNIQUE_SUFFIX}" --query "customerId" --output tsv)
+WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group $RESOURCE_GROUP --workspace-name "law-${APP_NAME}-${UNIQUE_SUFFIX}" --query "primarySharedKey" --output tsv)
+
+echo "Workspace ID: $WORKSPACE_ID"
+Subtask 4.2: Create Application Insights
+# Create Application Insights
+az monitor app-insights component create \
+    --app "ai-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --location $LOCATION \
+    --resource-group $RESOURCE_GROUP \
+    --workspace "law-${APP_NAME}-${UNIQUE_SUFFIX}"
+
+# Get instrumentation key
+INSTRUMENTATION_KEY=$(az monitor app-insights component show --app "ai-${APP_NAME}-${UNIQUE_SUFFIX}" --resource-group $RESOURCE_GROUP --query "instrumentationKey" --output tsv)
+
+echo "Instrumentation Key: $INSTRUMENTATION_KEY"
+Subtask 4.3: Configure Container Monitoring
+# Update backend container with monitoring
+cat > monitoring-app.py << 'EOF'
+from flask import Flask, jsonify
+import os
+import logging
+from datetime import datetime
+from opencensus.ext.azure.log_exporter import AzureLogHandler
+from opencensus.ext.flask.flask_middleware import FlaskMiddleware
+
+app = Flask(__name__)
+
+# Configure Azure Monitor logging
+logger = logging.getLogger(__name__)
+logger.addHandler(AzureLogHandler(connection_string=f'InstrumentationKey={os.environ.get("APPINSIGHTS_INSTRUMENTATIONKEY")}'))
+logger.setLevel(logging.INFO)
+
+# Configure OpenCensus middleware
+middleware = FlaskMiddleware(app)
+
+@app.route('/api/health')
+def health_check():
+    logger.info('Health check endpoint accessed')
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'backend-api'
+    })
+
+@app.route('/api/data')
+def get_data():
+    logger.info('Data endpoint accessed')
+    return jsonify({
+        'message': 'Data from backend API',
+        'timestamp': datetime.now().isoformat(),
+        'data': [
+            {'id': 1, 'name': 'Sample Data 1'},
+            {'id': 2, 'name': 'Sample Data 2'}
+        ]
+    })
+
+@app.route('/api/metrics')
+def get_metrics():
+    logger.info('Metrics endpoint accessed')
+    return jsonify({
+        'cpu_usage': '45%',
+        'memory_usage': '60%',
+        'requests_per_minute': 120,
+        'timestamp': datetime.now().isoformat()
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+EOF
+
+# Update requirements.txt
+cat > requirements-monitoring.txt << 'EOF'
+Flask==2.3.3
+psycopg2-binary==2.9.7
+opencensus-ext-azure==1.1.9
+opencensus-ext-flask==0.8.0
+EOF
+
+# Create new Dockerfile with monitoring
+cat > Dockerfile.backend-monitoring << 'EOF'
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements-monitoring.txt requirements.txt
+RUN pip install -r requirements.txt
+COPY monitoring-app.py app.py
+EXPOSE 8080
+ENV APPINSIGHTS_INSTRUMENTATIONKEY=""
+CMD ["python", "app.py"]
+EOF
+Subtask 4.4: Create Monitoring Dashboard
+# Create a custom dashboard configuration
+cat > dashboard-config.json << 'EOF'
+{
+  "lenses": {
+    "0": {
+      "order": 0,
+      "parts": {
+        "0": {
+          "position": {
+            "x": 0,
+            "y": 0,
+            "colSpan": 6,
+            "rowSpan": 4
+          },
+          "metadata": {
+            "inputs": [
+              {
+                "name": "resourceTypeMode",
+                "isOptional": true
+              },
+              {
+                "name": "ComponentId",
+                "isOptional": true
+              }
+            ],
+            "type": "Extension/HubsExtension/PartType/MonitorChartPart"
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "model": {
+      "timeRange": {
+        "value": {
+          "relative": {
+            "duration": 24,
+            "timeUnit": 1
+          }
+        },
+        "type": "MsPortalFx.Composition.Configuration.ValueTypes.TimeRange"
+      }
+    }
+  }
+}
+EOF
+
+echo "Dashboard configuration created. You can import this into Azure Portal."
+Subtask 4.5: Set Up Alerts
+# Create action group for notifications
+az monitor action-group create \
+    --resource-group $RESOURCE_GROUP \
+    --name "ag-${APP_NAME}-alerts" \
+    --short-name "AppAlerts"
+
+# Create metric alert for high CPU usage
+az monitor metrics alert create \
+    --name "High CPU Usage Alert" \
+    --resource-group $RESOURCE_GROUP \
+    --scopes "/subscriptions/$(az account show --query id --output tsv)/resourceGroups/$RESOURCE_GROUP" \
+    --condition "avg Percentage CPU > 80" \
+    --description "Alert when CPU usage exceeds 80%" \
+    --evaluation-frequency 5m \
+    --window-size 15m \
+    --severity 2 \
+    --action "ag-${APP_NAME}-alerts"
+Task 5: Ensure Compliance and Governance
+Subtask 5.1: Create Azure Policy
+# Create custom policy definition for required tags
+cat > policy-definition.json << 'EOF'
+{
+  "mode": "All",
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.Resources/subscriptions/resourceGroups"
+        },
+        {
+          "anyOf": [
+            {
+              "field": "tags['Environment']",
+              "exists": "false"
+            },
+            {
+              "field": "tags['Project']",
+              "exists": "false"
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "deny"
+    }
+  },
+  "parameters": {}
+}
+EOF
+
+# Create policy definition
+az policy definition create \
+    --name "require-tags-policy" \
+    --display-name "Require Environment and Project Tags" \
+    --description "This policy requires Environment and Project tags on resource groups" \
+    --rules policy-definition.json \
+    --mode All
+Subtask 5.2: Apply Tags for Compliance
+# Apply compliance tags to resource group
+az group update \
+    --name $RESOURCE_GROUP \
+    --tags Environment=Development Project=CapstoneProject Owner=Student
+
+# Apply tags to key resources
+az keyvault update \
+    --name "kv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --resource-group $RESOURCE_GROUP \
+    --tags Environment=Development Project=CapstoneProject Component=Security
+
+az postgres server update \
+    --resource-group $RESOURCE_GROUP \
+    --name "postgres-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --tags Environment=Development Project=CapstoneProject Component=Database
+Subtask 5.3: Create Backup Strategy
+# Enable backup for PostgreSQL (automatic by default, configure retention)
+az postgres server configuration set \
+    --resource-group $RESOURCE_GROUP \
+    --server-name "postgres-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --name backup_retention_days \
+    --value 7
+
+# Create recovery services vault for additional backups
+az backup vault create \
+    --resource-group $RESOURCE_GROUP \
+    --name "rsv-${APP_NAME}-${UNIQUE_SUFFIX}" \
+    --location $LOCATION
+Task 6: Create Solution Documentation
+Subtask 6.1: Generate Architecture Diagram
+# Create architecture documentation
+cat > architecture-overview.md << 'EOF'
+# Capstone Project Architecture Overview
+
+## Solution Components
+
+### Frontend Tier
+- **Technology**: Nginx serving static HTML/CSS/JavaScript
+- **Hosting**: Azure Container Instances
+- **Security**: Application Gateway with SSL termination
+- **Monitoring**: Application Insights integration
+
+### Backend Tier
+- **Technology**: Python Flask API
+- **Hosting**: Azure Container Instances
+- **Security**: Network Security Groups, Managed Identity
+- **Monitoring**: Application Insights, custom metrics
+
+### Database Tier
+- **Technology**: Azure Database for PostgreSQL
+- **Security**: Firewall rules, encrypted connections
+- **Backup**: Automated daily backups with 7-day retention
+- **Monitoring**: Built-in metrics and alerting
+
+### Security Features
+- **Network Security**: NSGs with least-privilege access
+- **Secrets Management**: Azure Key Vault for sensitive data
+- **Identity**: Managed Identity for service authentication
+- **Encryption**: SSL/TLS for data in transit, encryption at rest
+
+### Monitoring and Compliance
+- **Logging**: Centralized logging with Log Analytics
+- **Monitoring**: Application Insights for application performance
+- **Alerting**: Automated alerts for critical metrics
+- **Compliance**: Policy enforcement and resource tagging
+
+## Network Architecture
+Internet | Application Gateway (SSL Termination) | Frontend Subnet (10.0.1.0/24) | Backend Subnet (10.0.2.0/24) | Database Subnet (10.0.3.0/24)
+
+
+## Security Layers
+
+1. **Network Level**: NSGs and subnet isolation
+2. **Application Level**: Managed Identity and Key Vault
+3. **Data Level**: Database encryption and access controls
+4. **Transport Level**: SSL/TLS encryption
+EOF
+
+echo "Architecture documentation created successfully."
+Subtask 6.2: Create Deployment Guide
+# Create deployment guide
+cat > deployment-guide.md << 'EOF'
+# Deployment Guide
+
+## Prerequisites
+- Azure CLI installed and configured
+- Docker installed
+- Appropriate Azure subscription permissions
+
+## Deployment Steps
+
+### 1. Environment Setup
+```bash
+export RESOURCE_GROUP="rg-capstone-project"
+export LOCATION="eastus"
+export APP_NAME="capstone-app"
+export UNIQUE_SUFFIX=$(date +%s | tail -c 6)
+2. Infrastructure Deployment
+Create resource group
+Deploy virtual network and subnets
+Configure network security groups
+Create Application Gateway
+3. Application Deployment
+Build and push container images
+Deploy frontend and backend containers
+Configure database connections
+4. Security Configuration
+Set up Key Vault
+Configure managed identities
+Apply SSL certificates
+5. Monitoring Setup
+Configure Application Insights
+Set up Log Analytics workspace
+Create monitoring dashboards
+Configure alerts
+Post-Deployment Verification
+Health Checks
+Frontend accessibility: http://frontend-{app-name}-{suffix}.{location}.azurecontainer.io
+Backend API: http://backend-{app-name}-{suffix}.{location}.azurecontainer.io/api/health
+Database connectivity: Verify through backend API
+Security Verification
+SSL certificate validation
+Network security group rules
+Key Vault access policies
+Managed identity permissions
+Monitoring Verification
+Application Insights telemetry
+Log Analytics data ingestion
+Alert rule functionality
+Dashboard visualization EOF
+echo "Deployment guide created successfully."
+
+
+## Task 7: Solution Presentation
+
+### Subtask 7.1: Create Presentation Script
+
+```bash
+# Create presentation talking points
+cat > presentation-script.md << 'EOF'
+# Capstone Project Presentation Script
+
+## Introduction (2 minutes)
+- Project overview: Multi-tier web application on Azure
+- Objectives: Demonstrate cloud architecture best practices
+- Technologies used: Azure services, containers, open-source tools
+
+## Architecture Overview (5 minutes)
+
+### Multi-Tier Design
+- **Frontend**: Static web content served by Nginx
+- **Backend**: RESTful API built with Python Flask
+- **Database**: PostgreSQL for data persistence
+- **Load Balancer**: Application Gateway for traffic distribution
+
+### Network Architecture
+- Virtual network with isolated subnets
+- Network security groups for traffic control
+- Private communication between tiers
+- Public access only through Application Gateway
+
+## Security Implementation (5 minutes)
+
+### Defense in Depth
+1. **Network Security**: NSGs and subnet isolation
+2. **Identity Management**: Managed Identity for service authentication
+3. **Secrets Management**: Azure Key Vault for sensitive data
+4. **Encryption**: SSL/TLS for data in transit, encryption at rest
+5. **Access Control**: Least-privilege principle throughout
+
+### Key Security Features
+- SSL certificate management
+- Database connection encryption
+- API key protection in Key Vault
+- Network-level access restrictions
+
+## Monitoring and Observability (3 minutes)
+
+### Comprehensive Monitoring
+- **Application Performance**: Application Insights integration
+- **Infrastructure Metrics**: Log Analytics workspace
+- **Custom Dashboards**: Real-time visualization
+- **Automated Alerting**: Proactive issue detection
+
+### Key Metrics Tracked
+- Application response times
+- Error rates and exceptions
+- Resource utilization
+- Security events
+
+## Compliance and Governance (3 minutes)
+
+### Governance Framework
+- **Resource Tagging**: Consistent labeling for cost tracking
+- **Policy Enforcement**: Azure Policy for compliance
+- **Backup Strategy**: Automated database backups
+- **Audit Logging**: Comprehensive activity tracking
+
+### Compliance Features
+- Data retention policies
+- Access audit trails
+- Change management tracking
+- Regulatory compliance support
+
+## Demonstration (5 minutes)
+
+### Live Demo Points
+1. Access frontend application
+2. Show backend API responses
+3. Demonstrate monitoring dashboards
+4. Review security configurations
+5. Show compliance reporting
+
+## Conclusion an
