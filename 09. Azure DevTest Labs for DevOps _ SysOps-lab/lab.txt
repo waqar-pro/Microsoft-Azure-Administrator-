@@ -1,0 +1,391 @@
+Lab 9: Azure DevTest Labs for DevOps & SysOps
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the purpose and benefits of Azure DevTest Labs in development and testing workflows • Set up and configure an Azure DevTest Lab environment for application testing • Create and manage virtual machines within DevTest Labs • Configure custom artifacts to automate software installation and configuration • Implement policies for cost management and resource governance • Apply DevOps best practices using DevTest Labs for continuous integration and testing
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line operations • Basic knowledge of Azure services and resource management • Understanding of DevOps principles and practices • Access to an Azure subscription (provided by Al Nafi cloud environment) • Basic knowledge of JSON and YAML file formats
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own VM - everything is ready to use!
+
+Your cloud machine includes: • Azure CLI pre-installed and configured • Text editors (nano, vim) • Git for version control • All necessary tools for Azure DevTest Labs management
+
+Task 1: Set up an Azure DevTest Lab for Application Testing
+Subtask 1.1: Create a Resource Group
+First, we'll create a resource group to organize our DevTest Lab resources.
+
+# Set variables for consistent naming
+RESOURCE_GROUP="devtest-lab-rg"
+LOCATION="eastus"
+LAB_NAME="my-devtest-lab"
+
+# Create resource group
+az group create \
+    --name $RESOURCE_GROUP \
+    --location $LOCATION
+
+echo "Resource group created successfully!"
+Subtask 1.2: Create the DevTest Lab
+Now we'll create the actual DevTest Lab where we'll manage our testing environments.
+
+# Create DevTest Lab
+az lab create \
+    --resource-group $RESOURCE_GROUP \
+    --name $LAB_NAME \
+    --location $LOCATION \
+    --tags Environment=Testing Purpose=DevOps
+
+echo "DevTest Lab created successfully!"
+Subtask 1.3: Verify Lab Creation
+Let's verify that our lab was created successfully and check its properties.
+
+# List all labs in the resource group
+az lab list \
+    --resource-group $RESOURCE_GROUP \
+    --output table
+
+# Get detailed information about our lab
+az lab show \
+    --resource-group $RESOURCE_GROUP \
+    --name $LAB_NAME \
+    --output json
+Subtask 1.4: Configure Lab Settings
+We'll configure basic lab settings including time zones and auto-shutdown policies.
+
+# Configure lab settings
+az lab update \
+    --resource-group $RESOURCE_GROUP \
+    --name $LAB_NAME \
+    --tags Environment=Testing Purpose=DevOps Owner=Student
+
+echo "Lab settings configured successfully!"
+Task 2: Configure Custom Artifacts and Implement VM Management Policies
+Subtask 2.1: Create a Custom Artifact Repository
+We'll set up a Git repository to store our custom artifacts for automated software installation.
+
+# Create a directory for our artifact repository
+mkdir -p ~/devtest-artifacts
+cd ~/devtest-artifacts
+
+# Initialize Git repository
+git init
+git config user.name "DevTest Student"
+git config user.email "student@example.com"
+
+# Create artifact directory structure
+mkdir -p Artifacts/linux-nodejs-install
+Subtask 2.2: Create a Custom Node.js Installation Artifact
+Let's create a custom artifact that installs Node.js on Linux VMs.
+
+# Create the artifact definition file
+cat > Artifacts/linux-nodejs-install/artifactfile.json << 'EOF'
+{
+    "$schema": "https://raw.githubusercontent.com/Azure/azure-devtestlab/master/schemas/2016-11-28/dtlArtifacts.json",
+    "title": "Install Node.js on Linux",
+    "description": "Installs Node.js and npm on Linux systems",
+    "tags": [
+        "Linux",
+        "Node.js",
+        "Development"
+    ],
+    "iconUri": "https://raw.githubusercontent.com/Azure/azure-devtestlab/master/Artifacts/linux-install-nodejs/icon.png",
+    "targetOsType": "Linux",
+    "parameters": {
+        "nodeVersion": {
+            "type": "string",
+            "displayName": "Node.js Version",
+            "description": "Version of Node.js to install",
+            "defaultValue": "16.x"
+        }
+    },
+    "runCommand": {
+        "commandToExecute": "[concat('sh install-nodejs.sh ', parameters('nodeVersion'))]"
+    }
+}
+EOF
+Subtask 2.3: Create the Installation Script
+Now we'll create the actual installation script for our Node.js artifact.
+
+# Create the installation script
+cat > Artifacts/linux-nodejs-install/install-nodejs.sh << 'EOF'
+#!/bin/bash
+
+# Node.js Installation Script for DevTest Labs
+NODE_VERSION=$1
+
+echo "Starting Node.js installation..."
+echo "Target version: $NODE_VERSION"
+
+# Update package manager
+sudo apt-get update
+
+# Install curl if not present
+sudo apt-get install -y curl
+
+# Add NodeSource repository
+curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | sudo -E bash -
+
+# Install Node.js
+sudo apt-get install -y nodejs
+
+# Verify installation
+echo "Node.js version:"
+node --version
+
+echo "npm version:"
+npm --version
+
+echo "Node.js installation completed successfully!"
+EOF
+
+# Make the script executable
+chmod +x Artifacts/linux-nodejs-install/install-nodejs.sh
+Subtask 2.4: Commit Artifacts to Repository
+Let's commit our custom artifacts to the Git repository.
+
+# Add files to Git
+git add .
+
+# Commit the artifacts
+git commit -m "Add Node.js installation artifact for Linux VMs"
+
+echo "Artifacts committed to repository!"
+Subtask 2.5: Create a Virtual Machine in the Lab
+Now we'll create a VM in our DevTest Lab to test our artifacts.
+
+# Set VM variables
+VM_NAME="test-vm-01"
+VM_SIZE="Standard_B2s"
+IMAGE_NAME="Ubuntu Server 20.04 LTS"
+
+# Create VM in DevTest Lab
+az lab vm create \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --name $VM_NAME \
+    --image "Canonical:0001-com-ubuntu-server-focal:20_04-lts-gen2:latest" \
+    --size $VM_SIZE \
+    --authentication-type ssh \
+    --generate-ssh-keys \
+    --tags Purpose=Testing Environment=Development
+
+echo "VM creation initiated. This may take a few minutes..."
+Subtask 2.6: Configure Lab Policies for Cost Management
+We'll implement policies to control costs and manage resources effectively.
+
+# Set maximum VMs per user policy
+az lab policy set \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --policy-set-name default \
+    --name MaxVmsAllowedPerUser \
+    --threshold 3 \
+    --status Enabled
+
+echo "Maximum VMs per user policy set to 3"
+
+# Set maximum VMs per lab policy
+az lab policy set \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --policy-set-name default \
+    --name MaxVmsAllowedPerLab \
+    --threshold 10 \
+    --status Enabled
+
+echo "Maximum VMs per lab policy set to 10"
+Subtask 2.7: Configure Auto-Shutdown Policy
+Let's set up automatic shutdown to save costs when VMs are not in use.
+
+# Configure auto-shutdown for all VMs in the lab
+az lab policy set \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --policy-set-name default \
+    --name LabVmShutdownSchedule \
+    --status Enabled \
+    --time "18:00" \
+    --time-zone-id "Eastern Standard Time"
+
+echo "Auto-shutdown policy configured for 6:00 PM EST"
+Subtask 2.8: Set Allowed VM Sizes Policy
+We'll restrict the VM sizes that can be created to control costs.
+
+# Create allowed VM sizes policy
+az lab policy set \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --policy-set-name default \
+    --name AllowedVmSizesInLab \
+    --status Enabled \
+    --threshold '["Standard_B1s", "Standard_B2s", "Standard_B1ms", "Standard_B2ms"]'
+
+echo "Allowed VM sizes policy configured"
+Subtask 2.9: Verify VM Status and Apply Artifacts
+Let's check our VM status and apply our custom artifact.
+
+# Check VM status
+az lab vm show \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --name $VM_NAME \
+    --query "computeVm.statuses[0].displayStatus" \
+    --output tsv
+
+# List available artifacts (built-in ones)
+az lab artifact-source list \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --output table
+Subtask 2.10: Create a Formula for Standardized VM Creation
+We'll create a formula to standardize VM creation with pre-configured settings.
+
+# Create a formula for development VMs
+az lab formula create \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --name "dev-ubuntu-nodejs" \
+    --os-type Linux \
+    --formula-content '{
+        "description": "Ubuntu 20.04 with Node.js for development",
+        "author": "DevTest Lab Student",
+        "vm": {
+            "labVirtualNetworkId": "",
+            "notes": "Development VM with Node.js pre-installed",
+            "ownerObjectId": "",
+            "size": "Standard_B2s",
+            "userName": "labuser",
+            "password": "",
+            "isAuthenticationWithSshKey": true,
+            "sshKey": "",
+            "disallowPublicIpAddress": false,
+            "artifacts": [],
+            "galleryImageReference": {
+                "offer": "0001-com-ubuntu-server-focal",
+                "publisher": "Canonical",
+                "sku": "20_04-lts-gen2",
+                "osType": "Linux",
+                "version": "latest"
+            }
+        }
+    }'
+
+echo "Formula created for standardized development VMs"
+Subtask 2.11: Monitor Lab Usage and Costs
+Let's set up monitoring to track lab usage and costs.
+
+# Get lab information including cost tracking
+az lab show \
+    --resource-group $RESOURCE_GROUP \
+    --name $LAB_NAME \
+    --query "{Name:name, Location:location, ResourceGroup:resourceGroup, ProvisioningState:provisioningState}" \
+    --output table
+
+# List all VMs in the lab with their status
+az lab vm list \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --query "[].{Name:name, Size:size, Status:computeVm.statuses[0].displayStatus, Owner:ownerObjectId}" \
+    --output table
+
+echo "Lab monitoring information retrieved"
+Subtask 2.12: Create a Cleanup Script
+Finally, let's create a script to clean up resources when the lab is no longer needed.
+
+# Create cleanup script
+cat > ~/cleanup-devtest-lab.sh << 'EOF'
+#!/bin/bash
+
+echo "Starting DevTest Lab cleanup..."
+
+RESOURCE_GROUP="devtest-lab-rg"
+LAB_NAME="my-devtest-lab"
+
+# Stop all running VMs
+echo "Stopping all VMs in the lab..."
+az lab vm list \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --query "[?computeVm.statuses[0].displayStatus=='VM running'].name" \
+    --output tsv | while read vm_name; do
+    echo "Stopping VM: $vm_name"
+    az lab vm stop \
+        --resource-group $RESOURCE_GROUP \
+        --lab-name $LAB_NAME \
+        --name $vm_name
+done
+
+# Optional: Delete the entire lab (uncomment if needed)
+# echo "Deleting DevTest Lab..."
+# az lab delete \
+#     --resource-group $RESOURCE_GROUP \
+#     --name $LAB_NAME \
+#     --yes
+
+# Optional: Delete resource group (uncomment if needed)
+# echo "Deleting resource group..."
+# az group delete \
+#     --name $RESOURCE_GROUP \
+#     --yes \
+#     --no-wait
+
+echo "Cleanup completed!"
+EOF
+
+# Make cleanup script executable
+chmod +x ~/cleanup-devtest-lab.sh
+
+echo "Cleanup script created at ~/cleanup-devtest-lab.sh"
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: VM Creation Fails
+
+# Check quota limits
+az vm list-usage --location $LOCATION --output table
+
+# Verify available VM sizes
+az vm list-sizes --location $LOCATION --output table
+Issue 2: Policy Not Applied
+
+# Verify policy status
+az lab policy list \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --policy-set-name default \
+    --output table
+Issue 3: Artifact Installation Fails
+
+# Check VM logs
+az lab vm show \
+    --resource-group $RESOURCE_GROUP \
+    --lab-name $LAB_NAME \
+    --name $VM_NAME \
+    --expand artifacts
+Key Concepts Summary
+Azure DevTest Labs: A service that helps developers and testers quickly create environments in Azure while minimizing waste and controlling costs.
+
+Artifacts: Reusable components that install and configure software on VMs automatically.
+
+Policies: Rules that control resource usage, costs, and governance in the lab environment.
+
+Formulas: Templates that standardize VM creation with predefined configurations.
+
+Auto-shutdown: Cost-saving feature that automatically stops VMs at scheduled times.
+
+Conclusion
+In this lab, you have successfully:
+
+• Created an Azure DevTest Lab environment specifically designed for application testing and development workflows • Configured custom artifacts to automate Node.js installation on Linux VMs, demonstrating how to standardize development environments • Implemented comprehensive policies for cost management including VM limits, auto-shutdown schedules, and allowed VM sizes • Created formulas for standardized VM deployment, ensuring consistency across development teams • Set up monitoring and cleanup procedures to maintain efficient lab operations
+
+Why This Matters: Azure DevTest Labs is crucial for modern DevOps practices because it:
+
+Reduces Environment Setup Time: Developers can quickly spin up consistent testing environments
+Controls Costs: Automated policies prevent resource waste and unexpected charges
+Ensures Consistency: Artifacts and formulas guarantee that all team members work with identical configurations
+Supports Continuous Integration: Labs integrate seamlessly with CI/CD pipelines for automated testing
+Enables Self-Service: Teams can create and manage their own environments without IT intervention
+This knowledge prepares you for real-world DevOps scenarios where efficient environment management is essential for successful software delivery. The skills you've learned here directly apply to enterprise development workflows, making you more effective in collaborative development environments.
