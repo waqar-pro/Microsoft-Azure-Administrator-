@@ -1,0 +1,587 @@
+Lab 3: CI/CD Pipelines with Azure DevOps and GitHub Actions
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Continuous Integration and Continuous Deployment (CI/CD) • Set up a basic CI/CD pipeline using GitHub Actions • Create automated testing and deployment workflows • Implement version control best practices for CI/CD • Deploy a simple web application using automated pipelines • Troubleshoot common CI/CD pipeline issues
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of Git and version control concepts • Familiarity with command-line interface (CLI) • Basic knowledge of web development (HTML, CSS, JavaScript) • A GitHub account (free account is sufficient) • Basic understanding of YAML syntax
+
+Note: Al Nafi provides Linux-based cloud machines for this lab. Simply click "Start Lab" to access your pre-configured environment - no need to build your own VM.
+
+Lab Overview
+This lab focuses on creating CI/CD pipelines using open-source tools, specifically GitHub Actions. We will build a complete workflow that automatically tests and deploys a simple web application whenever code changes are made.
+
+Task 1: Setting Up Your Development Environment
+Subtask 1.1: Prepare Your Local Workspace
+Create a project directory:
+mkdir cicd-lab
+cd cicd-lab
+Initialize a new Git repository:
+git init
+git config user.name "Your Name"
+git config user.email "your.email@example.com"
+Create the basic project structure:
+mkdir src
+mkdir tests
+touch README.md
+touch .gitignore
+Subtask 1.2: Create a Simple Web Application
+Create the main HTML file:
+cat > src/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CI/CD Demo App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to CI/CD Demo</h1>
+        <p>This application demonstrates automated deployment!</p>
+        <button onclick="showMessage()">Click Me!</button>
+        <div id="message"></div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
+EOF
+Create the CSS file:
+cat > src/style.css << 'EOF'
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f0f0f0;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+h1 {
+    color: #333;
+    margin-bottom: 20px;
+}
+
+button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+#message {
+    margin-top: 20px;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+EOF
+Create the JavaScript file:
+cat > src/script.js << 'EOF'
+function showMessage() {
+    const messageDiv = document.getElementById('message');
+    messageDiv.innerHTML = 'Hello! Your CI/CD pipeline is working!';
+    messageDiv.className = 'success';
+}
+
+// Function for testing
+function addNumbers(a, b) {
+    return a + b;
+}
+
+// Export for testing (if using Node.js environment)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { addNumbers };
+}
+EOF
+Subtask 1.3: Create Test Files
+Create a simple test file:
+cat > tests/test.js << 'EOF'
+// Simple test for our JavaScript function
+function runTests() {
+    console.log('Running tests...');
+    
+    // Test 1: Addition function
+    const result1 = addNumbers(2, 3);
+    if (result1 === 5) {
+        console.log('✓ Test 1 passed: addNumbers(2, 3) = 5');
+    } else {
+        console.log('✗ Test 1 failed: expected 5, got', result1);
+        process.exit(1);
+    }
+    
+    // Test 2: Addition with negative numbers
+    const result2 = addNumbers(-1, 1);
+    if (result2 === 0) {
+        console.log('✓ Test 2 passed: addNumbers(-1, 1) = 0');
+    } else {
+        console.log('✗ Test 2 failed: expected 0, got', result2);
+        process.exit(1);
+    }
+    
+    console.log('All tests passed!');
+}
+
+// Include the function to test
+function addNumbers(a, b) {
+    return a + b;
+}
+
+// Run tests
+runTests();
+EOF
+Create package.json for Node.js dependencies:
+cat > package.json << 'EOF'
+{
+  "name": "cicd-demo-app",
+  "version": "1.0.0",
+  "description": "A simple web app for CI/CD demonstration",
+  "main": "src/index.html",
+  "scripts": {
+    "test": "node tests/test.js",
+    "start": "python3 -m http.server 8000 --directory src",
+    "lint": "echo 'Linting complete - no issues found'"
+  },
+  "keywords": ["cicd", "demo", "web-app"],
+  "author": "Student",
+  "license": "MIT"
+}
+EOF
+Create .gitignore file:
+cat > .gitignore << 'EOF'
+node_modules/
+.DS_Store
+*.log
+.env
+dist/
+build/
+EOF
+Task 2: Setting Up GitHub Repository and Actions
+Subtask 2.1: Create GitHub Repository
+Create README.md:
+cat > README.md << 'EOF'
+# CI/CD Demo Application
+
+This is a simple web application demonstrating CI/CD pipelines with GitHub Actions.
+
+## Features
+- Automated testing on every commit
+- Automated deployment to GitHub Pages
+- Simple web interface with interactive elements
+
+## Local Development
+
+1. Clone the repository
+2. Run `npm test` to execute tests
+3. Run `npm start` to serve the application locally
+4. Open http://localhost:8000 in your browser
+
+## CI/CD Pipeline
+
+This project uses GitHub Actions for:
+- Running automated tests
+- Deploying to GitHub Pages on successful builds
+EOF
+Commit your initial code:
+git add .
+git commit -m "Initial commit: Add basic web application with tests"
+Create a new repository on GitHub:
+
+Go to GitHub.com and sign in
+Click the "+" icon and select "New repository"
+Name it "cicd-demo-app"
+Make it public
+Do not initialize with README (we already have one)
+Click "Create repository"
+Connect your local repository to GitHub:
+
+git remote add origin https://github.com/YOUR_USERNAME/cicd-demo-app.git
+git branch -M main
+git push -u origin main
+Subtask 2.2: Create GitHub Actions Workflow
+Create the GitHub Actions directory structure:
+mkdir -p .github/workflows
+Create the main CI/CD workflow file:
+cat > .github/workflows/ci-cd.yml << 'EOF'
+name: CI/CD Pipeline
+
+# Trigger the workflow on push to main branch and pull requests
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Define jobs to run
+jobs:
+  # Job 1: Run tests
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # Step 1: Checkout the code
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Step 2: Set up Node.js environment
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    # Step 3: Install dependencies (if any)
+    - name: Install dependencies
+      run: npm install --only=dev || echo "No dependencies to install"
+    
+    # Step 4: Run linting
+    - name: Run linting
+      run: npm run lint
+    
+    # Step 5: Run tests
+    - name: Run tests
+      run: npm test
+    
+    # Step 6: Upload test results
+    - name: Upload test results
+      if: always()
+      run: echo "Tests completed"
+
+  # Job 2: Deploy to GitHub Pages (only on main branch)
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write
+      id-token: write
+    
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+    # Step 1: Checkout the code
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Step 2: Setup Pages
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+    
+    # Step 3: Upload artifact
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: './src'
+    
+    # Step 4: Deploy to GitHub Pages
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+EOF
+Create a workflow for pull request validation:
+cat > .github/workflows/pr-validation.yml << 'EOF'
+name: Pull Request Validation
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Check code quality
+      run: |
+        echo "Checking code quality..."
+        # Check for TODO comments
+        if grep -r "TODO" src/; then
+          echo "Warning: TODO comments found"
+        fi
+        echo "Code quality check completed"
+    
+    - name: Validate HTML
+      run: |
+        echo "Validating HTML structure..."
+        if grep -q "<!DOCTYPE html>" src/index.html; then
+          echo "✓ Valid HTML DOCTYPE found"
+        else
+          echo "✗ HTML DOCTYPE missing"
+          exit 1
+        fi
+EOF
+Task 3: Testing and Deploying Your CI/CD Pipeline
+Subtask 3.1: Enable GitHub Pages
+Commit and push your workflow files:
+git add .
+git commit -m "Add GitHub Actions CI/CD workflows"
+git push origin main
+Enable GitHub Pages in your repository:
+Go to your repository on GitHub
+Click on "Settings" tab
+Scroll down to "Pages" in the left sidebar
+Under "Source", select "GitHub Actions"
+Click "Save"
+Subtask 3.2: Test Your Pipeline
+Make a small change to test the pipeline:
+# Edit the HTML file to add a version number
+sed -i 's/Welcome to CI\/CD Demo/Welcome to CI\/CD Demo v1.1/' src/index.html
+Commit and push the change:
+git add src/index.html
+git commit -m "Update version to 1.1"
+git push origin main
+Monitor the workflow:
+Go to your GitHub repository
+Click on the "Actions" tab
+Watch your workflow run in real-time
+Check both the "test" and "deploy" jobs
+Subtask 3.3: Create and Test a Pull Request
+Create a new branch for feature development:
+git checkout -b feature/add-footer
+Add a footer to your HTML:
+# Add footer before closing body tag
+sed -i 's/<\/body>/    <footer style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #666;">\n        <p>© 2024 CI\/CD Demo App - Deployed with GitHub Actions<\/p>\n    <\/footer>\n<\/body>/' src/index.html
+Commit and push the feature branch:
+git add src/index.html
+git commit -m "Add footer with deployment info"
+git push origin feature/add-footer
+Create a Pull Request:
+
+Go to your GitHub repository
+Click "Compare & pull request" button
+Add a title: "Add footer to application"
+Add description: "This PR adds a footer showing deployment information"
+Click "Create pull request"
+Observe the PR validation workflow:
+
+Watch the "Pull Request Validation" workflow run
+See how it validates your changes before allowing merge
+Merge the Pull Request:
+
+Once checks pass, click "Merge pull request"
+Click "Confirm merge"
+Delete the feature branch
+Subtask 3.4: Verify Deployment
+Check your deployed application:
+
+Go to your repository settings
+Navigate to "Pages"
+Click on your site URL (usually: https://YOUR_USERNAME.github.io/cicd-demo-app)
+Verify your application is running with the new footer
+Test the application functionality:
+
+Click the button to ensure JavaScript works
+Verify the styling is applied correctly
+Check that the footer appears
+Task 4: Advanced Pipeline Features
+Subtask 4.1: Add Environment-Specific Deployments
+Create a staging workflow:
+cat > .github/workflows/staging.yml << 'EOF'
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [ develop ]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
+        echo "Staging URL: https://staging.example.com"
+        echo "Deployment completed successfully!"
+EOF
+Add build status badges to README:
+cat > README.md << 'EOF'
+# CI/CD Demo Application
+
+![CI/CD Pipeline](https://github.com/YOUR_USERNAME/cicd-demo-app/workflows/CI/CD%20Pipeline/badge.svg)
+![Pull Request Validation](https://github.com/YOUR_USERNAME/cicd-demo-app/workflows/Pull%20Request%20Validation/badge.svg)
+
+This is a simple web application demonstrating CI/CD pipelines with GitHub Actions.
+
+## Features
+- Automated testing on every commit
+- Automated deployment to GitHub Pages
+- Pull request validation
+- Simple web interface with interactive elements
+
+## Live Demo
+🚀 [View Live Application](https://YOUR_USERNAME.github.io/cicd-demo-app)
+
+## Local Development
+
+1. Clone the repository
+```bash
+git clone https://github.com/YOUR_USERNAME/cicd-demo-app.git
+cd cicd-demo-app
+Run tests
+npm test
+Start local server
+npm start
+Open http://localhost:8000 in your browser
+CI/CD Pipeline
+This project uses GitHub Actions for:
+
+✅ Running automated tests
+✅ Code quality validation
+✅ Deploying to GitHub Pages on successful builds
+✅ Pull request validation
+Workflow Files
+.github/workflows/ci-cd.yml - Main CI/CD pipeline
+.github/workflows/pr-validation.yml - Pull request validation
+.github/workflows/staging.yml - Staging deployment
+Project Structure
+cicd-demo-app/
+├── src/
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+├── tests/
+│   └── test.js
+├── .github/
+│   └── workflows/
+│       ├── ci-cd.yml
+│       ├── pr-validation.yml
+│       └── staging.yml
+└── package.json
+EOF
+
+
+### Subtask 4.2: Add Notification and Monitoring
+
+1. **Create a workflow with notifications**:
+```bash
+cat > .github/workflows/notify.yml << 'EOF'
+name: Deployment Notifications
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types:
+      - completed
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - name: Deployment Success Notification
+      run: |
+        echo "🎉 Deployment completed successfully!"
+        echo "📅 Deployed at: $(date)"
+        echo "🔗 Application URL: https://${{ github.repository_owner }}.github.io/cicd-demo-app"
+        echo "✅ All tests passed"
+EOF
+Commit all new files:
+git add .
+git commit -m "Add advanced pipeline features and documentation"
+git push origin main
+Troubleshooting Common Issues
+Issue 1: GitHub Pages Not Deploying
+Problem: The site doesn't deploy to GitHub Pages Solution:
+
+Check repository settings → Pages → Source is set to "GitHub Actions"
+Verify the workflow has proper permissions
+Check the Actions tab for error messages
+Issue 2: Tests Failing
+Problem: Tests fail in the pipeline but work locally Solution:
+
+Check the test output in the Actions tab
+Ensure all dependencies are properly specified
+Verify file paths are correct (case-sensitive in Linux)
+Issue 3: Workflow Not Triggering
+Problem: GitHub Actions workflow doesn't run Solution:
+
+Check the workflow file syntax (YAML is indentation-sensitive)
+Verify the trigger conditions (branch names, event types)
+Ensure the workflow file is in .github/workflows/ directory
+Issue 4: Permission Errors
+Problem: Deployment fails with permission errors Solution:
+
+Check that the workflow has the necessary permissions
+Verify GITHUB_TOKEN has required scopes
+Ensure repository settings allow Actions to deploy
+Conclusion
+Congratulations! You have successfully completed the CI/CD Pipeline lab. Here's what you accomplished:
+
+Key Achievements
+Created a Complete Web Application: Built a functional web app with HTML, CSS, and JavaScript
+Implemented Automated Testing: Set up tests that run automatically on every code change
+Built CI/CD Pipelines: Created workflows that automatically test and deploy your application
+Mastered GitHub Actions: Learned to use one of the most popular CI/CD platforms
+Practiced Git Workflows: Used branches, pull requests, and proper version control practices
+Deployed to Production: Your application is now live and accessible on the internet
+Why This Matters
+CI/CD pipelines are essential in modern software development because they:
+
+Reduce Human Error: Automated processes are more reliable than manual deployments
+Increase Development Speed: Developers can focus on coding while automation handles deployment
+Improve Code Quality: Automated testing catches bugs before they reach production
+Enable Rapid Iteration: Teams can deploy multiple times per day safely
+Provide Consistency: Every deployment follows the same tested process
+Real-World Applications
+The skills you've learned apply directly to:
+
+Professional Software Development: Most companies use CI/CD pipelines
+Open Source Projects: Contributing to projects on GitHub
+Personal Projects: Automating your own application deployments
+DevOps Practices: Understanding the bridge between development and operations
+Next Steps
+To continue learning:
+
+Explore Advanced Features: Add database deployments, environment variables, and secrets management
+Try Other Platforms: Learn Azure DevOps, Jenkins, or GitLab CI/CD
+Add More Tests: Implement unit tests, integration tests, and end-to-end tests
+Monitor Applications: Add logging, monitoring, and alerting to your deployments
+Scale Up: Deploy to cloud platforms like AWS, Azure, or Google Cloud
+You now have a solid foundation in CI/CD practices that will serve you well in your software development journey
