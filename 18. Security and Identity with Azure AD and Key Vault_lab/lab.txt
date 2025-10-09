@@ -1,0 +1,401 @@
+Lab 8: Security and Identity with Azure AD and Key Vault
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of identity and access management using Azure Active Directory (Azure AD) • Implement secure authentication in a web application using Azure AD integration • Configure and use Azure Key Vault to store and manage application secrets • Integrate Key Vault with a simple web application to retrieve secrets securely • Apply security best practices for managing credentials and sensitive data • Demonstrate how cloud-based identity services enhance application security
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of web applications and HTTP protocols • Familiarity with command-line interfaces • Basic knowledge of JSON format and REST APIs • Understanding of authentication concepts (usernames, passwords, tokens) • Access to a web browser for Azure portal navigation
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines. Simply click "Start Lab" to begin - no need to build your own VM or install additional software.
+
+Lab Overview
+This lab focuses on implementing security features using Azure's identity and secret management services. You'll create a simple web application that authenticates users through Azure AD and securely retrieves configuration data from Azure Key Vault. All tasks can be completed on localhost using open-source tools and Azure's free tier services.
+
+Task 1: Set Up Azure AD for Identity Management
+Subtask 1.1: Create Azure AD Application Registration
+Step 1: Access Azure Portal
+
+Open your web browser and navigate to https://portal.azure.com
+Sign in with your Azure account credentials
+In the search bar, type "Azure Active Directory" and select it
+Step 2: Register a New Application
+
+In the Azure AD overview page, click on "App registrations" in the left menu
+Click "New registration" button
+Fill in the application details:
+Name: SecureWebApp-Lab8
+Supported account types: Select "Accounts in this organizational directory only"
+Redirect URI: Select "Web" and enter http://localhost:3000/auth/callback
+Click "Register" to create the application
+Step 3: Configure Application Settings
+
+After registration, note down the Application (client) ID - you'll need this later
+Click on "Certificates & secrets" in the left menu
+Click "New client secret"
+Add description: Lab8-Secret
+Set expiration to "6 months"
+Click "Add" and immediately copy the secret value (it won't be shown again)
+Subtask 1.2: Set Up Local Development Environment
+Step 1: Create Project Directory
+
+mkdir secure-web-app
+cd secure-web-app
+Step 2: Initialize Node.js Project
+
+npm init -y
+Step 3: Install Required Dependencies
+
+npm install express passport passport-azure-ad dotenv
+npm install --save-dev nodemon
+Step 4: Create Environment Configuration File
+
+touch .env
+Add the following content to .env file:
+
+AZURE_CLIENT_ID=your_application_client_id_here
+AZURE_CLIENT_SECRET=your_client_secret_here
+AZURE_TENANT_ID=your_tenant_id_here
+SESSION_SECRET=your_random_session_secret_here
+Replace the placeholder values with your actual Azure AD application details.
+
+Task 2: Implement Azure AD Authentication
+Subtask 2.1: Create Authentication Server
+Step 1: Create Main Application File Create app.js with the following content:
+
+const express = require('express');
+const passport = require('passport');
+const OIDCStrategy = require('passport-azure-ad').OIDCStrategy;
+require('dotenv').config();
+
+const app = express();
+const PORT = 3000;
+
+// Session configuration
+app.use(require('express-session')({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false
+}));
+
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Passport session setup
+passport.serializeUser((user, done) => {
+    done(null, user);
+});
+
+passport.deserializeUser((user, done) => {
+    done(null, user);
+});
+
+// Azure AD OIDC Strategy
+passport.use(new OIDCStrategy({
+    identityMetadata: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0/.well-known/openid_configuration`,
+    clientID: process.env.AZURE_CLIENT_ID,
+    clientSecret: process.env.AZURE_CLIENT_SECRET,
+    responseType: 'code',
+    responseMode: 'form_post',
+    redirectUrl: 'http://localhost:3000/auth/callback',
+    allowHttpForRedirectUrl: true,
+    passReqToCallback: false,
+    scope: ['profile', 'offline_access', 'openid']
+}, (iss, sub, profile, accessToken, refreshToken, done) => {
+    return done(null, profile);
+}));
+
+// Routes
+app.get('/', (req, res) => {
+    if (req.isAuthenticated()) {
+        res.send(`
+            <h1>Welcome to Secure Web App</h1>
+            <p>Hello, ${req.user.displayName}!</p>
+            <p>Email: ${req.user._json.email}</p>
+            <a href="/secrets">View Secrets</a> | 
+            <a href="/logout">Logout</a>
+        `);
+    } else {
+        res.send(`
+            <h1>Secure Web App - Lab 8</h1>
+            <p>Please authenticate to access the application.</p>
+            <a href="/auth/login">Login with Azure AD</a>
+        `);
+    }
+});
+
+// Authentication routes
+app.get('/auth/login', passport.authenticate('azuread-openidconnect', {
+    failureRedirect: '/'
+}));
+
+app.post('/auth/callback', passport.authenticate('azuread-openidconnect', {
+    successRedirect: '/',
+    failureRedirect: '/'
+}));
+
+app.get('/logout', (req, res) => {
+    req.logout(() => {
+        res.redirect('/');
+    });
+});
+
+// Protected route
+app.get('/secrets', ensureAuthenticated, (req, res) => {
+    res.send(`
+        <h1>Protected Secrets Page</h1>
+        <p>This page is only accessible to authenticated users.</p>
+        <p>User: ${req.user.displayName}</p>
+        <a href="/">Home</a>
+    `);
+});
+
+// Middleware to ensure authentication
+function ensureAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) {
+        return next();
+    }
+    res.redirect('/auth/login');
+}
+
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});
+Step 2: Update Package.json Scripts Add the following to your package.json scripts section:
+
+{
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  }
+}
+Step 3: Test Azure AD Authentication
+
+npm run dev
+Open your browser and navigate to http://localhost:3000
+Click "Login with Azure AD"
+Complete the authentication process
+Verify that you can access the protected routes
+Task 3: Integrate Azure Key Vault for Secret Management
+Subtask 3.1: Create and Configure Azure Key Vault
+Step 1: Create Key Vault in Azure Portal
+
+In Azure Portal, search for "Key vaults" and select it
+Click "Create" to create a new Key Vault
+Fill in the details:
+Subscription: Select your subscription
+Resource group: Create new or select existing
+Key vault name: lab8-keyvault-[your-initials]
+Region: Select your preferred region
+Pricing tier: Standard
+Click "Review + create" then "Create"
+Step 2: Add Secrets to Key Vault
+
+Once created, navigate to your Key Vault
+Click on "Secrets" in the left menu
+Click "Generate/Import"
+Create the following secrets:
+Name: database-connection-string
+
+Value: Server=localhost;Database=SecureApp;Trusted_Connection=true;
+
+Name: api-key
+
+Value: sk-1234567890abcdef
+
+Name: encryption-key
+
+Value: MySecretEncryptionKey2023!
+
+Step 3: Configure Access Policies
+
+In your Key Vault, click "Access policies"
+Click "Add Access Policy"
+Configure permissions:
+Secret permissions: Select "Get" and "List"
+Select principal: Search and select your Azure AD application
+Click "Add" then "Save"
+Subtask 3.2: Implement Key Vault Integration
+Step 1: Install Azure Key Vault SDK
+
+npm install @azure/keyvault-secrets @azure/identity
+Step 2: Update Environment Variables Add to your .env file:
+
+KEY_VAULT_URL=https://your-keyvault-name.vault.azure.net/
+Step 3: Create Key Vault Service Module Create keyVaultService.js:
+
+const { SecretClient } = require('@azure/keyvault-secrets');
+const { ClientSecretCredential } = require('@azure/identity');
+require('dotenv').config();
+
+class KeyVaultService {
+    constructor() {
+        const credential = new ClientSecretCredential(
+            process.env.AZURE_TENANT_ID,
+            process.env.AZURE_CLIENT_ID,
+            process.env.AZURE_CLIENT_SECRET
+        );
+        
+        this.client = new SecretClient(process.env.KEY_VAULT_URL, credential);
+    }
+
+    async getSecret(secretName) {
+        try {
+            const secret = await this.client.getSecret(secretName);
+            return secret.value;
+        } catch (error) {
+            console.error(`Error retrieving secret ${secretName}:`, error.message);
+            throw error;
+        }
+    }
+
+    async getAllSecrets() {
+        try {
+            const secrets = {};
+            for await (const secretProperties of this.client.listPropertiesOfSecrets()) {
+                const secretName = secretProperties.name;
+                const secretValue = await this.getSecret(secretName);
+                secrets[secretName] = secretValue;
+            }
+            return secrets;
+        } catch (error) {
+            console.error('Error retrieving all secrets:', error.message);
+            throw error;
+        }
+    }
+}
+
+module.exports = KeyVaultService;
+Step 4: Update Main Application with Key Vault Integration Update your app.js to include Key Vault functionality:
+
+const express = require('express');
+const passport = require('passport');
+const OIDCStrategy = require('passport-azure-ad').OIDCStrategy;
+const KeyVaultService = require('./keyVaultService');
+require('dotenv').config();
+
+const app = express();
+const PORT = 3000;
+const keyVaultService = new KeyVaultService();
+
+// [Previous passport and session configuration remains the same]
+
+// Updated protected route with Key Vault integration
+app.get('/secrets', ensureAuthenticated, async (req, res) => {
+    try {
+        const databaseConnection = await keyVaultService.getSecret('database-connection-string');
+        const apiKey = await keyVaultService.getSecret('api-key');
+        const encryptionKey = await keyVaultService.getSecret('encryption-key');
+
+        res.send(`
+            <h1>Protected Secrets from Azure Key Vault</h1>
+            <p>Welcome, ${req.user.displayName}!</p>
+            <div style="background-color: #f0f0f0; padding: 10px; margin: 10px 0;">
+                <h3>Retrieved Secrets:</h3>
+                <p><strong>Database Connection:</strong> ${databaseConnection.substring(0, 20)}...</p>
+                <p><strong>API Key:</strong> ${apiKey.substring(0, 10)}...</p>
+                <p><strong>Encryption Key:</strong> ${encryptionKey.substring(0, 15)}...</p>
+            </div>
+            <p><em>Note: Secrets are partially hidden for security demonstration</em></p>
+            <a href="/">Home</a>
+        `);
+    } catch (error) {
+        res.status(500).send(`
+            <h1>Error Retrieving Secrets</h1>
+            <p>Unable to retrieve secrets from Key Vault: ${error.message}</p>
+            <a href="/">Home</a>
+        `);
+    }
+});
+
+// New route to demonstrate secret management
+app.get('/config', ensureAuthenticated, async (req, res) => {
+    try {
+        const allSecrets = await keyVaultService.getAllSecrets();
+        const secretNames = Object.keys(allSecrets);
+
+        res.send(`
+            <h1>Application Configuration</h1>
+            <p>User: ${req.user.displayName}</p>
+            <h3>Available Configuration Secrets:</h3>
+            <ul>
+                ${secretNames.map(name => `<li>${name}</li>`).join('')}
+            </ul>
+            <p>Total secrets managed: ${secretNames.length}</p>
+            <a href="/secrets">View Secret Values</a> | 
+            <a href="/">Home</a>
+        `);
+    } catch (error) {
+        res.status(500).send(`
+            <h1>Configuration Error</h1>
+            <p>Unable to load configuration: ${error.message}</p>
+            <a href="/">Home</a>
+        `);
+    }
+});
+
+// [Rest of the application code remains the same]
+Subtask 3.3: Test Complete Integration
+Step 1: Start the Application
+
+npm run dev
+Step 2: Test Authentication and Secret Retrieval
+
+Navigate to http://localhost:3000
+Login with Azure AD
+Access the /secrets route to view Key Vault secrets
+Access the /config route to see secret management
+Step 3: Verify Security Features
+
+Try accessing protected routes without authentication
+Confirm secrets are retrieved from Key Vault, not hardcoded
+Test logout functionality
+Troubleshooting Common Issues
+Issue 1: Authentication Callback Error
+Problem: Redirect URI mismatch Solution: Ensure the redirect URI in Azure AD matches exactly: http://localhost:3000/auth/callback
+
+Issue 2: Key Vault Access Denied
+Problem: Insufficient permissions Solution:
+
+Verify access policies in Key Vault
+Ensure the Azure AD application has "Get" and "List" permissions for secrets
+Check that client ID and secret are correct
+Issue 3: Environment Variables Not Loading
+Problem: Application cannot find configuration Solution:
+
+Verify .env file is in the project root
+Ensure all required variables are set
+Restart the application after making changes
+Issue 4: Network Connection Issues
+Problem: Cannot connect to Azure services Solution:
+
+Check internet connectivity
+Verify Azure service URLs are correct
+Ensure firewall allows outbound HTTPS connections
+Security Best Practices Demonstrated
+Identity Management
+• Single Sign-On (SSO): Users authenticate once through Azure AD • Centralized Identity: All user management handled by Azure AD • Token-Based Authentication: Secure token exchange instead of password storage
+
+Secret Management
+• Centralized Secret Storage: All sensitive data stored in Key Vault • Access Control: Fine-grained permissions for secret access • Audit Trail: All secret access is logged and monitored • Secret Rotation: Secrets can be updated without code changes
+
+Application Security
+• No Hardcoded Secrets: All sensitive data retrieved from secure storage • Least Privilege Access: Application only has necessary permissions • Secure Communication: All Azure communication over HTTPS
+
+Conclusion
+In this lab, you have successfully:
+
+• Implemented Azure AD Authentication: Created a secure authentication system that integrates with Microsoft's identity platform, eliminating the need to manage user credentials directly in your application
+
+• Integrated Azure Key Vault: Demonstrated how to securely store and retrieve sensitive application data like connection strings, API keys, and encryption keys without hardcoding them in your source code
+
+• Applied Security Best Practices: Learned how to implement centralized identity management and secret storage, which are fundamental security practices in modern cloud applications
+
+• Built a Complete Secure Application: Created a working web application that demonstrates real-world security patterns used by professional developers
+
+Why This Matters: In today's digital world, security breaches often occur due to poor credential management and weak authentication systems. By using Azure AD and Key Vault, you've learned how to build applications that follow enterprise-grade security standards. These skills are essential for any developer working with cloud applications, as they help protect both user data and business-critical information.
+
+The techniques you've learned in this lab form the foundation of secure application development and are widely used across the technology industry. Understanding identity management and secret storage will make you a more valuable developer and help you build applications that users can trust.
