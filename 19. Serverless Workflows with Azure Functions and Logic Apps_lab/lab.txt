@@ -1,0 +1,993 @@
+Lab 9: Serverless Workflows with Azure Functions and Logic Apps
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of serverless computing and event-driven architecture • Design and implement a serverless application using open-source alternatives to Azure Functions • Create workflow orchestration using open-source tools similar to Logic Apps • Integrate multiple serverless components to build a complete application • Deploy and test serverless functions locally • Implement event-driven communication between different components • Monitor and debug serverless applications
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of JavaScript/Node.js programming • Familiarity with REST APIs and HTTP requests • Basic knowledge of JSON data format • Understanding of command-line interface operations • Basic concepts of web development
+
+Required Software: • Node.js (version 14 or higher) • npm (Node Package Manager) • Text editor or IDE (VS Code recommended) • Git (for version control) • Postman or curl for API testing
+
+Ready-to-Use Cloud Machines
+Al Nafi provides pre-configured Linux-based cloud machines with all necessary tools installed. Simply click Start Lab to access your environment. No need to build your own VM or install software manually. The cloud machine includes:
+
+• Node.js runtime environment • npm package manager • Text editors and development tools • All required dependencies pre-installed
+
+Lab Overview
+In this lab, we will create a serverless workflow system using open-source tools that simulate Azure Functions and Logic Apps functionality. We'll build a simple e-commerce order processing system that demonstrates event-driven architecture and workflow orchestration.
+
+Task 1: Design a Serverless Event-Driven Application
+Subtask 1.1: Set Up the Development Environment
+Step 1: Create the project directory structure
+
+mkdir serverless-workflow-lab
+cd serverless-workflow-lab
+mkdir functions
+mkdir workflows
+mkdir shared
+mkdir tests
+Step 2: Initialize the Node.js project
+
+npm init -y
+Step 3: Install required dependencies
+
+npm install express body-parser axios uuid nodemailer fs-extra
+npm install --save-dev nodemon jest
+Step 4: Create the main application structure
+
+touch app.js
+touch functions/orderProcessor.js
+touch functions/inventoryChecker.js
+touch functions/emailNotifier.js
+touch workflows/orderWorkflow.js
+touch shared/eventBus.js
+touch shared/config.js
+Subtask 1.2: Create the Event Bus System
+Step 1: Implement the event bus for inter-function communication
+
+Create shared/eventBus.js:
+
+const EventEmitter = require('events');
+
+class ServerlessEventBus extends EventEmitter {
+    constructor() {
+        super();
+        this.events = [];
+        this.subscribers = new Map();
+    }
+
+    // Publish an event
+    publish(eventType, data) {
+        const event = {
+            id: require('uuid').v4(),
+            type: eventType,
+            data: data,
+            timestamp: new Date().toISOString(),
+            source: 'serverless-app'
+        };
+
+        this.events.push(event);
+        console.log(`📢 Event Published: ${eventType}`, event);
+        
+        // Emit the event to all listeners
+        this.emit(eventType, event);
+        
+        return event;
+    }
+
+    // Subscribe to events
+    subscribe(eventType, handler) {
+        if (!this.subscribers.has(eventType)) {
+            this.subscribers.set(eventType, []);
+        }
+        
+        this.subscribers.get(eventType).push(handler);
+        this.on(eventType, handler);
+        
+        console.log(`🔔 Subscribed to event: ${eventType}`);
+    }
+
+    // Get event history
+    getEventHistory() {
+        return this.events;
+    }
+
+    // Clear event history
+    clearHistory() {
+        this.events = [];
+    }
+}
+
+module.exports = new ServerlessEventBus();
+Step 2: Create configuration file
+
+Create shared/config.js:
+
+module.exports = {
+    server: {
+        port: process.env.PORT || 3000,
+        host: 'localhost'
+    },
+    email: {
+        service: 'gmail',
+        user: 'test@example.com',
+        password: 'testpassword'
+    },
+    inventory: {
+        lowStockThreshold: 10
+    },
+    events: {
+        ORDER_RECEIVED: 'order.received',
+        INVENTORY_CHECKED: 'inventory.checked',
+        PAYMENT_PROCESSED: 'payment.processed',
+        EMAIL_SENT: 'email.sent',
+        ORDER_COMPLETED: 'order.completed',
+        ORDER_FAILED: 'order.failed'
+    }
+};
+Subtask 1.3: Implement Serverless Functions
+Step 1: Create the Order Processor Function
+
+Create functions/orderProcessor.js:
+
+const eventBus = require('../shared/eventBus');
+const config = require('../shared/config');
+
+class OrderProcessor {
+    constructor() {
+        this.orders = new Map();
+        this.setupEventHandlers();
+    }
+
+    setupEventHandlers() {
+        // Listen for new orders
+        eventBus.subscribe(config.events.ORDER_RECEIVED, this.processOrder.bind(this));
+    }
+
+    async processOrder(event) {
+        try {
+            console.log('🛒 Processing Order:', event.data);
+            
+            const order = event.data;
+            order.status = 'processing';
+            order.processedAt = new Date().toISOString();
+            
+            // Store order
+            this.orders.set(order.id, order);
+            
+            // Simulate processing time
+            await this.delay(1000);
+            
+            // Validate order data
+            if (!this.validateOrder(order)) {
+                throw new Error('Invalid order data');
+            }
+            
+            // Trigger inventory check
+            eventBus.publish(config.events.INVENTORY_CHECKED, {
+                orderId: order.id,
+                items: order.items,
+                customerId: order.customerId
+            });
+            
+            console.log('✅ Order processed successfully:', order.id);
+            
+        } catch (error) {
+            console.error('❌ Order processing failed:', error.message);
+            eventBus.publish(config.events.ORDER_FAILED, {
+                orderId: event.data.id,
+                error: error.message
+            });
+        }
+    }
+
+    validateOrder(order) {
+        return order.id && 
+               order.customerId && 
+               order.items && 
+               Array.isArray(order.items) && 
+               order.items.length > 0;
+    }
+
+    async delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    getOrder(orderId) {
+        return this.orders.get(orderId);
+    }
+
+    getAllOrders() {
+        return Array.from(this.orders.values());
+    }
+}
+
+module.exports = new OrderProcessor();
+Step 2: Create the Inventory Checker Function
+
+Create functions/inventoryChecker.js:
+
+const eventBus = require('../shared/eventBus');
+const config = require('../shared/config');
+
+class InventoryChecker {
+    constructor() {
+        this.inventory = new Map([
+            ['laptop', { stock: 15, price: 999.99 }],
+            ['mouse', { stock: 50, price: 29.99 }],
+            ['keyboard', { stock: 8, price: 79.99 }],
+            ['monitor', { stock: 20, price: 299.99 }]
+        ]);
+        
+        this.setupEventHandlers();
+    }
+
+    setupEventHandlers() {
+        eventBus.subscribe(config.events.INVENTORY_CHECKED, this.checkInventory.bind(this));
+    }
+
+    async checkInventory(event) {
+        try {
+            console.log('📦 Checking Inventory:', event.data);
+            
+            const { orderId, items, customerId } = event.data;
+            const inventoryResults = [];
+            let totalAmount = 0;
+            let allItemsAvailable = true;
+
+            // Check each item
+            for (const item of items) {
+                const inventoryItem = this.inventory.get(item.productId);
+                
+                if (!inventoryItem) {
+                    allItemsAvailable = false;
+                    inventoryResults.push({
+                        productId: item.productId,
+                        requested: item.quantity,
+                        available: 0,
+                        status: 'not_found'
+                    });
+                } else if (inventoryItem.stock < item.quantity) {
+                    allItemsAvailable = false;
+                    inventoryResults.push({
+                        productId: item.productId,
+                        requested: item.quantity,
+                        available: inventoryItem.stock,
+                        status: 'insufficient_stock'
+                    });
+                } else {
+                    // Reserve inventory
+                    inventoryItem.stock -= item.quantity;
+                    totalAmount += inventoryItem.price * item.quantity;
+                    
+                    inventoryResults.push({
+                        productId: item.productId,
+                        requested: item.quantity,
+                        available: inventoryItem.stock + item.quantity,
+                        reserved: item.quantity,
+                        price: inventoryItem.price,
+                        status: 'reserved'
+                    });
+                }
+            }
+
+            if (allItemsAvailable) {
+                // Trigger payment processing
+                eventBus.publish(config.events.PAYMENT_PROCESSED, {
+                    orderId,
+                    customerId,
+                    amount: totalAmount,
+                    inventoryResults
+                });
+                
+                console.log('✅ Inventory check passed for order:', orderId);
+            } else {
+                // Inventory check failed
+                eventBus.publish(config.events.ORDER_FAILED, {
+                    orderId,
+                    reason: 'insufficient_inventory',
+                    inventoryResults
+                });
+                
+                console.log('❌ Inventory check failed for order:', orderId);
+            }
+
+        } catch (error) {
+            console.error('❌ Inventory check error:', error.message);
+            eventBus.publish(config.events.ORDER_FAILED, {
+                orderId: event.data.orderId,
+                error: error.message
+            });
+        }
+    }
+
+    getInventory() {
+        return Object.fromEntries(this.inventory);
+    }
+
+    updateStock(productId, quantity) {
+        if (this.inventory.has(productId)) {
+            this.inventory.get(productId).stock = quantity;
+            return true;
+        }
+        return false;
+    }
+}
+
+module.exports = new InventoryChecker();
+Step 3: Create the Email Notifier Function
+
+Create functions/emailNotifier.js:
+
+const eventBus = require('../shared/eventBus');
+const config = require('../shared/config');
+
+class EmailNotifier {
+    constructor() {
+        this.emailQueue = [];
+        this.setupEventHandlers();
+    }
+
+    setupEventHandlers() {
+        eventBus.subscribe(config.events.PAYMENT_PROCESSED, this.sendOrderConfirmation.bind(this));
+        eventBus.subscribe(config.events.ORDER_FAILED, this.sendOrderFailure.bind(this));
+    }
+
+    async sendOrderConfirmation(event) {
+        try {
+            console.log('📧 Sending order confirmation email:', event.data);
+            
+            const { orderId, customerId, amount, inventoryResults } = event.data;
+            
+            const email = {
+                id: require('uuid').v4(),
+                to: `customer-${customerId}@example.com`,
+                subject: `Order Confirmation - ${orderId}`,
+                body: this.generateConfirmationEmail(orderId, amount, inventoryResults),
+                timestamp: new Date().toISOString(),
+                status: 'sent'
+            };
+
+            // Simulate email sending
+            await this.delay(500);
+            this.emailQueue.push(email);
+
+            // Trigger order completion
+            eventBus.publish(config.events.ORDER_COMPLETED, {
+                orderId,
+                customerId,
+                amount,
+                emailSent: true
+            });
+
+            console.log('✅ Order confirmation email sent:', email.id);
+
+        } catch (error) {
+            console.error('❌ Email sending failed:', error.message);
+        }
+    }
+
+    async sendOrderFailure(event) {
+        try {
+            console.log('📧 Sending order failure notification:', event.data);
+            
+            const { orderId, reason, error } = event.data;
+            
+            const email = {
+                id: require('uuid').v4(),
+                to: `customer@example.com`,
+                subject: `Order Failed - ${orderId}`,
+                body: this.generateFailureEmail(orderId, reason || error),
+                timestamp: new Date().toISOString(),
+                status: 'sent'
+            };
+
+            await this.delay(500);
+            this.emailQueue.push(email);
+
+            console.log('✅ Order failure email sent:', email.id);
+
+        } catch (error) {
+            console.error('❌ Failure email sending failed:', error.message);
+        }
+    }
+
+    generateConfirmationEmail(orderId, amount, items) {
+        return `
+Dear Customer,
+
+Your order ${orderId} has been confirmed!
+
+Order Details:
+- Total Amount: $${amount.toFixed(2)}
+- Items: ${items.length} item(s)
+
+Thank you for your purchase!
+
+Best regards,
+Serverless Store Team
+        `.trim();
+    }
+
+    generateFailureEmail(orderId, reason) {
+        return `
+Dear Customer,
+
+Unfortunately, your order ${orderId} could not be processed.
+
+Reason: ${reason}
+
+Please contact our support team for assistance.
+
+Best regards,
+Serverless Store Team
+        `.trim();
+    }
+
+    async delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    getEmailHistory() {
+        return this.emailQueue;
+    }
+}
+
+module.exports = new EmailNotifier();
+Task 2: Integrate Logic Apps for Workflow Orchestration
+Subtask 2.1: Create Workflow Orchestrator
+Step 1: Implement the workflow orchestration engine
+
+Create workflows/orderWorkflow.js:
+
+const eventBus = require('../shared/eventBus');
+const config = require('../shared/config');
+
+class OrderWorkflow {
+    constructor() {
+        this.workflows = new Map();
+        this.workflowDefinitions = new Map();
+        this.setupWorkflowDefinitions();
+        this.setupEventHandlers();
+    }
+
+    setupWorkflowDefinitions() {
+        // Define the order processing workflow
+        const orderProcessingWorkflow = {
+            id: 'order-processing',
+            name: 'Order Processing Workflow',
+            steps: [
+                {
+                    id: 'receive-order',
+                    name: 'Receive Order',
+                    type: 'trigger',
+                    event: config.events.ORDER_RECEIVED
+                },
+                {
+                    id: 'process-order',
+                    name: 'Process Order',
+                    type: 'function',
+                    dependsOn: ['receive-order'],
+                    timeout: 5000
+                },
+                {
+                    id: 'check-inventory',
+                    name: 'Check Inventory',
+                    type: 'function',
+                    dependsOn: ['process-order'],
+                    timeout: 3000
+                },
+                {
+                    id: 'process-payment',
+                    name: 'Process Payment',
+                    type: 'function',
+                    dependsOn: ['check-inventory'],
+                    timeout: 5000
+                },
+                {
+                    id: 'send-confirmation',
+                    name: 'Send Confirmation Email',
+                    type: 'function',
+                    dependsOn: ['process-payment'],
+                    timeout: 2000
+                },
+                {
+                    id: 'complete-order',
+                    name: 'Complete Order',
+                    type: 'end',
+                    dependsOn: ['send-confirmation']
+                }
+            ]
+        };
+
+        this.workflowDefinitions.set('order-processing', orderProcessingWorkflow);
+    }
+
+    setupEventHandlers() {
+        // Listen to all workflow events
+        eventBus.subscribe(config.events.ORDER_RECEIVED, this.startWorkflow.bind(this));
+        eventBus.subscribe(config.events.INVENTORY_CHECKED, this.updateWorkflowStep.bind(this));
+        eventBus.subscribe(config.events.PAYMENT_PROCESSED, this.updateWorkflowStep.bind(this));
+        eventBus.subscribe(config.events.ORDER_COMPLETED, this.completeWorkflow.bind(this));
+        eventBus.subscribe(config.events.ORDER_FAILED, this.failWorkflow.bind(this));
+    }
+
+    startWorkflow(event) {
+        const workflowId = require('uuid').v4();
+        const orderId = event.data.id;
+
+        const workflowInstance = {
+            id: workflowId,
+            orderId: orderId,
+            definitionId: 'order-processing',
+            status: 'running',
+            startTime: new Date().toISOString(),
+            currentStep: 'receive-order',
+            completedSteps: ['receive-order'],
+            stepHistory: [{
+                stepId: 'receive-order',
+                status: 'completed',
+                timestamp: new Date().toISOString(),
+                data: event.data
+            }],
+            context: {
+                order: event.data,
+                customer: event.data.customerId
+            }
+        };
+
+        this.workflows.set(workflowId, workflowInstance);
+        
+        console.log('🔄 Workflow started:', {
+            workflowId,
+            orderId,
+            definition: 'order-processing'
+        });
+
+        // Move to next step
+        this.moveToNextStep(workflowInstance, 'process-order');
+    }
+
+    updateWorkflowStep(event) {
+        // Find workflow by order ID
+        const workflow = this.findWorkflowByOrderId(event.data.orderId);
+        
+        if (!workflow) {
+            console.log('⚠️ No workflow found for order:', event.data.orderId);
+            return;
+        }
+
+        // Determine next step based on event type
+        let nextStep = null;
+        let stepId = null;
+
+        switch (event.type) {
+            case config.events.INVENTORY_CHECKED:
+                stepId = 'check-inventory';
+                nextStep = 'process-payment';
+                break;
+            case config.events.PAYMENT_PROCESSED:
+                stepId = 'process-payment';
+                nextStep = 'send-confirmation';
+                break;
+        }
+
+        if (stepId) {
+            this.completeStep(workflow, stepId, event.data);
+            if (nextStep) {
+                this.moveToNextStep(workflow, nextStep);
+            }
+        }
+    }
+
+    completeWorkflow(event) {
+        const workflow = this.findWorkflowByOrderId(event.data.orderId);
+        
+        if (workflow) {
+            this.completeStep(workflow, 'send-confirmation', event.data);
+            this.completeStep(workflow, 'complete-order', event.data);
+            
+            workflow.status = 'completed';
+            workflow.endTime = new Date().toISOString();
+            workflow.duration = new Date(workflow.endTime) - new Date(workflow.startTime);
+
+            console.log('✅ Workflow completed:', {
+                workflowId: workflow.id,
+                orderId: workflow.orderId,
+                duration: `${workflow.duration}ms`
+            });
+        }
+    }
+
+    failWorkflow(event) {
+        const workflow = this.findWorkflowByOrderId(event.data.orderId);
+        
+        if (workflow) {
+            workflow.status = 'failed';
+            workflow.endTime = new Date().toISOString();
+            workflow.error = event.data.error || event.data.reason;
+
+            workflow.stepHistory.push({
+                stepId: 'error',
+                status: 'failed',
+                timestamp: new Date().toISOString(),
+                error: workflow.error
+            });
+
+            console.log('❌ Workflow failed:', {
+                workflowId: workflow.id,
+                orderId: workflow.orderId,
+                error: workflow.error
+            });
+        }
+    }
+
+    moveToNextStep(workflow, stepId) {
+        workflow.currentStep = stepId;
+        
+        workflow.stepHistory.push({
+            stepId: stepId,
+            status: 'started',
+            timestamp: new Date().toISOString()
+        });
+
+        console.log(`🔄 Workflow step started: ${stepId} for order ${workflow.orderId}`);
+    }
+
+    completeStep(workflow, stepId, data) {
+        if (!workflow.completedSteps.includes(stepId)) {
+            workflow.completedSteps.push(stepId);
+        }
+
+        // Update step history
+        const stepHistoryEntry = workflow.stepHistory.find(
+            step => step.stepId === stepId && step.status === 'started'
+        );
+
+        if (stepHistoryEntry) {
+            stepHistoryEntry.status = 'completed';
+            stepHistoryEntry.completedAt = new Date().toISOString();
+            stepHistoryEntry.data = data;
+        } else {
+            workflow.stepHistory.push({
+                stepId: stepId,
+                status: 'completed',
+                timestamp: new Date().toISOString(),
+                data: data
+            });
+        }
+
+        console.log(`✅ Workflow step completed: ${stepId} for order ${workflow.orderId}`);
+    }
+
+    findWorkflowByOrderId(orderId) {
+        for (const workflow of this.workflows.values()) {
+            if (workflow.orderId === orderId) {
+                return workflow;
+            }
+        }
+        return null;
+    }
+
+    getWorkflow(workflowId) {
+        return this.workflows.get(workflowId);
+    }
+
+    getAllWorkflows() {
+        return Array.from(this.workflows.values());
+    }
+
+    getWorkflowsByStatus(status) {
+        return Array.from(this.workflows.values()).filter(w => w.status === status);
+    }
+}
+
+module.exports = new OrderWorkflow();
+Subtask 2.2: Create the Main Application Server
+Step 1: Implement the main application server
+
+Create app.js:
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const eventBus = require('./shared/eventBus');
+const config = require('./shared/config');
+
+// Import all functions and workflows
+const orderProcessor = require('./functions/orderProcessor');
+const inventoryChecker = require('./functions/inventoryChecker');
+const emailNotifier = require('./functions/emailNotifier');
+const orderWorkflow = require('./workflows/orderWorkflow');
+
+const app = express();
+
+// Middleware
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Enable CORS for testing
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    next();
+});
+
+// Routes
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        services: {
+            eventBus: 'running',
+            orderProcessor: 'running',
+            inventoryChecker: 'running',
+            emailNotifier: 'running',
+            orderWorkflow: 'running'
+        }
+    });
+});
+
+// Submit new order (triggers the workflow)
+app.post('/orders', (req, res) => {
+    try {
+        const order = {
+            id: require('uuid').v4(),
+            customerId: req.body.customerId || 'customer-123',
+            items: req.body.items || [],
+            timestamp: new Date().toISOString(),
+            status: 'received'
+        };
+
+        // Validate order
+        if (!order.items || order.items.length === 0) {
+            return res.status(400).json({
+                error: 'Order must contain at least one item'
+            });
+        }
+
+        // Publish order received event
+        eventBus.publish(config.events.ORDER_RECEIVED, order);
+
+        res.status(201).json({
+            message: 'Order received and processing started',
+            orderId: order.id,
+            status: 'processing'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            error: 'Failed to process order',
+            details: error.message
+        });
+    }
+});
+
+// Get order status
+app.get('/orders/:orderId', (req, res) => {
+    const orderId = req.params.orderId;
+    const order = orderProcessor.getOrder(orderId);
+    
+    if (!order) {
+        return res.status(404).json({
+            error: 'Order not found'
+        });
+    }
+
+    // Find associated workflow
+    const workflows = orderWorkflow.getAllWorkflows();
+    const workflow = workflows.find(w => w.orderId === orderId);
+
+    res.json({
+        order: order,
+        workflow: workflow ? {
+            id: workflow.id,
+            status: workflow.status,
+            currentStep: workflow.currentStep,
+            completedSteps: workflow.completedSteps,
+            stepHistory: workflow.stepHistory
+        } : null
+    });
+});
+
+// Get all orders
+app.get('/orders', (req, res) => {
+    const orders = orderProcessor.getAllOrders();
+    res.json({
+        orders: orders,
+        count: orders.length
+    });
+});
+
+// Get inventory status
+app.get('/inventory', (req, res) => {
+    const inventory = inventoryChecker.getInventory();
+    res.json({
+        inventory: inventory,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Update inventory
+app.put('/inventory/:productId', (req, res) => {
+    const productId = req.params.productId;
+    const quantity = req.body.quantity;
+
+    if (typeof quantity !== 'number' || quantity < 0) {
+        return res.status(400).json({
+            error: 'Quantity must be a non-negative number'
+        });
+    }
+
+    const updated = inventoryChecker.updateStock(productId, quantity);
+    
+    if (updated) {
+        res.json({
+            message: 'Inventory updated successfully',
+            productId: productId,
+            newQuantity: quantity
+        });
+    } else {
+        res.status(404).json({
+            error: 'Product not found'
+        });
+    }
+});
+
+// Get email history
+app.get('/emails', (req, res) => {
+    const emails = emailNotifier.getEmailHistory();
+    res.json({
+        emails: emails,
+        count: emails.length
+    });
+});
+
+// Get workflow status
+app.get('/workflows', (req, res) => {
+    const workflows = orderWorkflow.getAllWorkflows();
+    res.json({
+        workflows: workflows,
+        count: workflows.length,
+        summary: {
+            running: workflows.filter(w => w.status === 'running').length,
+            completed: workflows.filter(w => w.status === 'completed').length,
+            failed: workflows.filter(w => w.status === 'failed').length
+        }
+    });
+});
+
+// Get specific workflow
+app.get('/workflows/:workflowId', (req, res) => {
+    const workflowId = req.params.workflowId;
+    const workflow = orderWorkflow.getWorkflow(workflowId);
+    
+    if (!workflow) {
+        return res.status(404).json({
+            error: 'Workflow not found'
+        });
+    }
+
+    res.json(workflow);
+});
+
+// Get event history
+app.get('/events', (req, res) => {
+    const events = eventBus.getEventHistory();
+    res.json({
+        events: events,
+        count: events.length
+    });
+});
+
+// Clear event history (for testing)
+app.delete('/events', (req, res) => {
+    eventBus.clearHistory();
+    res.json({
+        message: 'Event history cleared'
+    });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+    console.error('Server error:', error);
+    res.status(500).json({
+        error: 'Internal server error',
+        details: error.message
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        error: 'Endpoint not found',
+        path: req.path
+    });
+});
+
+// Start server
+const PORT = config.server.port;
+app.listen(PORT, () => {
+    console.log(`🚀 Serverless Workflow Application started on port ${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`📝 API Documentation:`);
+    console.log(`   POST /orders - Submit new order`);
+    console.log(`   GET  /orders - Get all orders`);
+    console.log(`   GET  /orders/:id - Get specific order`);
+    console.log(`   GET  /inventory - Get inventory status`);
+    console.log(`   PUT  /inventory/:productId - Update inventory`);
+    console.log(`   GET  /workflows - Get all workflows`);
+    console.log(`   GET  /workflows/:id - Get specific workflow`);
+    console.log(`   GET  /emails - Get email history`);
+    console.log(`   GET  /events - Get event history`);
+    console.log(`\n🎯 Ready to process serverless workflows!`);
+});
+
+module.exports = app;
+Subtask 2.3: Create Test Scripts
+Step 1: Create package.json scripts
+
+Update package.json:
+
+{
+  "name": "serverless-workflow-lab",
+  "version": "1.0.0",
+  "description": "Serverless workflow application with event-driven architecture",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test": "jest",
+    "test-order": "node tests/testOrder.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "axios": "^1.4.0",
+    "uuid": "^9.0.0",
+    "nodemailer": "^6.9.3",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22",
+    "jest": "^29.5.0"
+  }
+}
+Step 2: Create test script for order processing
+
+Create tests/testOrder.js:
+
+const axios = require('axios');
+
+const BASE_URL = 'http://localhost:3000';
+
+async function testOrderWorkflow() {
+    console.log('🧪 Starting Order Workflow Test\n');
+
+    try {
+        // Test 1: Check health
+        console.log('1. Checking application health...');
+        const healthResponse = await axios.get(`${BASE_URL}/health`);
+        console.log('✅ Health check passed:', healthResponse.data.status);
+        console.log('');
+
+        // Test 2: Check initial inventory
+        console.log('2. Checking initial inventory...');
+        const inventoryResponse = await axios.get(`${BASE_URL}/inventory`);
+        console.log('📦 Current inventory:', inventoryResponse.data.inventory);
+        console.log('');
+
+        // Test 3: Submit a test order
+        console.log('3. Submitting test order...');
+        const orderData = {
+            customerId: 'test-customer-001',
+            items: [
+                { productId: 'laptop', quantity: 1 },
+                { productId: 'mouse', quantity: 2 }
+            ]
+        };
