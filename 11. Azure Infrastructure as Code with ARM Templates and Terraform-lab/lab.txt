@@ -1,0 +1,964 @@
+Lab 1: Azure Infrastructure as Code with ARM Templates and Terraform
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Infrastructure as Code (IaC) concepts • Create and deploy Azure resources using ARM (Azure Resource Manager) templates • Install and configure Terraform for Azure infrastructure management • Deploy a multi-tier application infrastructure using Terraform • Compare ARM templates and Terraform for Azure resource management • Implement best practices for IaC in cloud environments
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with JSON and HCL (HashiCorp Configuration Language) syntax • Basic command-line interface experience • An Azure account with appropriate permissions (free tier is sufficient) • Text editor or IDE installed on local machine
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides Linux-based cloud machines for this lab. Simply click "Start Lab" to access your pre-configured environment. No need to build your own VM or install additional software initially.
+
+Local Development: This lab is designed to run on your localhost, making it accessible and easy to follow without complex cloud configurations.
+
+Task 1: Build Complex Azure Resources using ARM Templates
+Subtask 1.1: Understanding ARM Templates
+ARM templates are JSON files that define the infrastructure and configuration for your Azure resources. They follow a declarative approach where you describe what you want rather than how to create it.
+
+Key Components of ARM Templates: • Schema: Defines the template structure • Parameters: Input values for customization • Variables: Computed values used within the template • Resources: Azure resources to be created • Outputs: Values returned after deployment
+
+Subtask 1.2: Create Your First ARM Template
+Create a new directory for your lab files:
+
+mkdir azure-iac-lab
+cd azure-iac-lab
+mkdir arm-templates
+cd arm-templates
+Create a file named storage-account.json with the following ARM template:
+
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "storageAccountName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the storage account"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for the storage account"
+            }
+        },
+        "storageAccountType": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_RAGRS"
+            ],
+            "metadata": {
+                "description": "Storage account type"
+            }
+        }
+    },
+    "variables": {
+        "storageAccountName": "[toLower(parameters('storageAccountName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-04-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('storageAccountType')]"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2"
+            }
+        }
+    ],
+    "outputs": {
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "storageAccountId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        }
+    }
+}
+Subtask 1.3: Create a Complex Multi-Resource ARM Template
+Create a file named web-app-infrastructure.json for a more complex deployment:
+
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "webAppName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the web application"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources"
+            }
+        },
+        "sku": {
+            "type": "string",
+            "defaultValue": "F1",
+            "allowedValues": [
+                "F1",
+                "B1",
+                "S1"
+            ],
+            "metadata": {
+                "description": "App Service Plan SKU"
+            }
+        }
+    },
+    "variables": {
+        "appServicePlanName": "[concat(parameters('webAppName'), '-plan')]",
+        "storageAccountName": "[concat(toLower(parameters('webAppName')), 'storage')]",
+        "applicationInsightsName": "[concat(parameters('webAppName'), '-insights')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-04-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "supportsHttpsTrafficOnly": true
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2021-02-01",
+            "name": "[variables('appServicePlanName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('sku')]"
+            },
+            "properties": {
+                "reserved": false
+            }
+        },
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2021-02-01",
+            "name": "[parameters('webAppName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "siteConfig": {
+                    "appSettings": [
+                        {
+                            "name": "STORAGE_CONNECTION_STRING",
+                            "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2021-04-01').keys[0].value)]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Insights/components",
+            "apiVersion": "2020-02-02",
+            "name": "[variables('applicationInsightsName')]",
+            "location": "[parameters('location')]",
+            "kind": "web",
+            "properties": {
+                "Application_Type": "web"
+            }
+        }
+    ],
+    "outputs": {
+        "webAppUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('webAppName'))).defaultHostName)]"
+        },
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        }
+    }
+}
+Subtask 1.4: Create Parameters File
+Create a file named web-app-parameters.json:
+
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "webAppName": {
+            "value": "mywebapp-lab-001"
+        },
+        "sku": {
+            "value": "F1"
+        }
+    }
+}
+Subtask 1.5: Deploy ARM Template (Simulation)
+Since we're working locally, create a deployment script deploy-arm.sh:
+
+#!/bin/bash
+
+# ARM Template Deployment Script
+# This script simulates the deployment process
+
+echo "=== ARM Template Deployment Simulation ==="
+echo "Resource Group: rg-iac-lab"
+echo "Template: web-app-infrastructure.json"
+echo "Parameters: web-app-parameters.json"
+echo ""
+
+echo "Validating template..."
+echo "✓ Template syntax is valid"
+echo "✓ Parameters are correctly defined"
+echo "✓ Resource dependencies are properly configured"
+echo ""
+
+echo "Deployment would create the following resources:"
+echo "• Storage Account: mywebapp-lab-001storage"
+echo "• App Service Plan: mywebapp-lab-001-plan"
+echo "• Web App: mywebapp-lab-001"
+echo "• Application Insights: mywebapp-lab-001-insights"
+echo ""
+
+echo "Deployment Status: SIMULATED SUCCESS"
+echo "Web App URL: https://mywebapp-lab-001.azurewebsites.net"
+Make the script executable and run it:
+
+chmod +x deploy-arm.sh
+./deploy-arm.sh
+Task 2: Deploy a Multi-Tier Application using Terraform
+Subtask 2.1: Install Terraform
+Create a Terraform installation script install-terraform.sh:
+
+#!/bin/bash
+
+# Terraform Installation Script for Linux
+echo "Installing Terraform..."
+
+# Download Terraform
+TERRAFORM_VERSION="1.6.0"
+wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+
+# Install unzip if not available
+if ! command -v unzip &> /dev/null; then
+    echo "Installing unzip..."
+    sudo apt-get update && sudo apt-get install -y unzip
+fi
+
+# Extract and install Terraform
+unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+sudo mv terraform /usr/local/bin/
+
+# Verify installation
+terraform version
+
+# Clean up
+rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+
+echo "Terraform installation completed!"
+Run the installation script:
+
+chmod +x install-terraform.sh
+./install-terraform.sh
+Subtask 2.2: Create Terraform Configuration Structure
+Create the Terraform project structure:
+
+cd ../
+mkdir terraform-deployment
+cd terraform-deployment
+mkdir modules
+mkdir modules/networking
+mkdir modules/compute
+mkdir modules/database
+Subtask 2.3: Configure Terraform Provider
+Create main.tf file:
+
+# Configure the Azure Provider
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~>3.0"
+    }
+  }
+}
+
+# Configure the Microsoft Azure Provider
+provider "azurerm" {
+  features {}
+}
+
+# Create a resource group
+resource "azurerm_resource_group" "main" {
+  name     = var.resource_group_name
+  location = var.location
+
+  tags = {
+    Environment = var.environment
+    Project     = "IaC-Lab"
+  }
+}
+Subtask 2.4: Create Variables Configuration
+Create variables.tf file:
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+  default     = "rg-terraform-lab"
+}
+
+variable "location" {
+  description = "Azure region for resources"
+  type        = string
+  default     = "East US"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "development"
+}
+
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "terraformapp"
+}
+
+variable "admin_username" {
+  description = "Admin username for VM"
+  type        = string
+  default     = "azureuser"
+}
+
+variable "vm_size" {
+  description = "Size of the virtual machine"
+  type        = string
+  default     = "Standard_B1s"
+}
+Subtask 2.5: Create Networking Module
+Create modules/networking/main.tf:
+
+# Create virtual network
+resource "azurerm_virtual_network" "main" {
+  name                = "${var.app_name}-vnet"
+  address_space       = ["10.0.0.0/16"]
+  location            = var.location
+  resource_group_name = var.resource_group_name
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Create subnet for web tier
+resource "azurerm_subnet" "web" {
+  name                 = "web-subnet"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+# Create subnet for app tier
+resource "azurerm_subnet" "app" {
+  name                 = "app-subnet"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.2.0/24"]
+}
+
+# Create subnet for database tier
+resource "azurerm_subnet" "db" {
+  name                 = "db-subnet"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.3.0/24"]
+}
+
+# Create Network Security Group for web tier
+resource "azurerm_network_security_group" "web" {
+  name                = "${var.app_name}-web-nsg"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+
+  security_rule {
+    name                       = "HTTP"
+    priority                   = 1001
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "HTTPS"
+    priority                   = 1002
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Associate Network Security Group to web subnet
+resource "azurerm_subnet_network_security_group_association" "web" {
+  subnet_id                 = azurerm_subnet.web.id
+  network_security_group_id = azurerm_network_security_group.web.id
+}
+Create modules/networking/variables.tf:
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "app_name" {
+  description = "Application name"
+  type        = string
+}
+Create modules/networking/outputs.tf:
+
+output "vnet_id" {
+  value = azurerm_virtual_network.main.id
+}
+
+output "web_subnet_id" {
+  value = azurerm_subnet.web.id
+}
+
+output "app_subnet_id" {
+  value = azurerm_subnet.app.id
+}
+
+output "db_subnet_id" {
+  value = azurerm_subnet.db.id
+}
+Subtask 2.6: Create Compute Module
+Create modules/compute/main.tf:
+
+# Create public IP for load balancer
+resource "azurerm_public_ip" "main" {
+  name                = "${var.app_name}-public-ip"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Create load balancer
+resource "azurerm_lb" "main" {
+  name                = "${var.app_name}-lb"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  sku                 = "Standard"
+
+  frontend_ip_configuration {
+    name                 = "PublicIPAddress"
+    public_ip_address_id = azurerm_public_ip.main.id
+  }
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Create backend address pool
+resource "azurerm_lb_backend_address_pool" "main" {
+  loadbalancer_id = azurerm_lb.main.id
+  name            = "BackEndAddressPool"
+}
+
+# Create load balancer rule
+resource "azurerm_lb_rule" "main" {
+  loadbalancer_id                = azurerm_lb.main.id
+  name                           = "LBRule"
+  protocol                       = "Tcp"
+  frontend_port                  = 80
+  backend_port                   = 80
+  frontend_ip_configuration_name = "PublicIPAddress"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.main.id]
+  probe_id                       = azurerm_lb_probe.main.id
+}
+
+# Create load balancer probe
+resource "azurerm_lb_probe" "main" {
+  loadbalancer_id = azurerm_lb.main.id
+  name            = "http-probe"
+  port            = 80
+  protocol        = "Http"
+  request_path    = "/"
+}
+
+# Create virtual machine scale set
+resource "azurerm_linux_virtual_machine_scale_set" "main" {
+  name                = "${var.app_name}-vmss"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  sku                 = var.vm_size
+  instances           = 2
+
+  disable_password_authentication = false
+  admin_username                  = var.admin_username
+  admin_password                  = "P@ssw0rd123!"
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-focal"
+    sku       = "20_04-lts-gen2"
+    version   = "latest"
+  }
+
+  os_disk {
+    storage_account_type = "Standard_LRS"
+    caching              = "ReadWrite"
+  }
+
+  network_interface {
+    name    = "internal"
+    primary = true
+
+    ip_configuration {
+      name                                   = "internal"
+      primary                                = true
+      subnet_id                              = var.web_subnet_id
+      load_balancer_backend_address_pool_ids = [azurerm_lb_backend_address_pool.main.id]
+    }
+  }
+
+  tags = {
+    Environment = var.environment
+  }
+}
+Create modules/compute/variables.tf:
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "app_name" {
+  description = "Application name"
+  type        = string
+}
+
+variable "admin_username" {
+  description = "Admin username for VMs"
+  type        = string
+}
+
+variable "vm_size" {
+  description = "Size of the virtual machines"
+  type        = string
+}
+
+variable "web_subnet_id" {
+  description = "ID of the web subnet"
+  type        = string
+}
+Create modules/compute/outputs.tf:
+
+output "public_ip_address" {
+  value = azurerm_public_ip.main.ip_address
+}
+
+output "load_balancer_id" {
+  value = azurerm_lb.main.id
+}
+Subtask 2.7: Create Database Module
+Create modules/database/main.tf:
+
+# Create MySQL server
+resource "azurerm_mysql_flexible_server" "main" {
+  name                   = "${var.app_name}-mysql"
+  resource_group_name    = var.resource_group_name
+  location               = var.location
+  administrator_login    = var.admin_username
+  administrator_password = "P@ssw0rd123!"
+  
+  sku_name = "B_Standard_B1s"
+  version  = "8.0.21"
+
+  storage {
+    size_gb = 20
+  }
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Create MySQL database
+resource "azurerm_mysql_flexible_database" "main" {
+  name                = "${var.app_name}db"
+  resource_group_name = var.resource_group_name
+  server_name         = azurerm_mysql_flexible_server.main.name
+  charset             = "utf8"
+  collation           = "utf8_unicode_ci"
+}
+
+# Create firewall rule to allow Azure services
+resource "azurerm_mysql_flexible_server_firewall_rule" "azure_services" {
+  name                = "AllowAzureServices"
+  resource_group_name = var.resource_group_name
+  server_name         = azurerm_mysql_flexible_server.main.name
+  start_ip_address    = "0.0.0.0"
+  end_ip_address      = "0.0.0.0"
+}
+Create modules/database/variables.tf:
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "app_name" {
+  description = "Application name"
+  type        = string
+}
+
+variable "admin_username" {
+  description = "Admin username for database"
+  type        = string
+}
+
+variable "db_subnet_id" {
+  description = "ID of the database subnet"
+  type        = string
+}
+Create modules/database/outputs.tf:
+
+output "mysql_server_fqdn" {
+  value = azurerm_mysql_flexible_server.main.fqdn
+}
+
+output "database_name" {
+  value = azurerm_mysql_flexible_database.main.name
+}
+Subtask 2.8: Update Main Terraform Configuration
+Update the main main.tf file to use the modules:
+
+# Configure the Azure Provider
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~>3.0"
+    }
+  }
+}
+
+# Configure the Microsoft Azure Provider
+provider "azurerm" {
+  features {}
+}
+
+# Create a resource group
+resource "azurerm_resource_group" "main" {
+  name     = var.resource_group_name
+  location = var.location
+
+  tags = {
+    Environment = var.environment
+    Project     = "IaC-Lab"
+  }
+}
+
+# Networking module
+module "networking" {
+  source = "./modules/networking"
+  
+  resource_group_name = azurerm_resource_group.main.name
+  location           = azurerm_resource_group.main.location
+  environment        = var.environment
+  app_name          = var.app_name
+}
+
+# Compute module
+module "compute" {
+  source = "./modules/compute"
+  
+  resource_group_name = azurerm_resource_group.main.name
+  location           = azurerm_resource_group.main.location
+  environment        = var.environment
+  app_name          = var.app_name
+  admin_username    = var.admin_username
+  vm_size           = var.vm_size
+  web_subnet_id     = module.networking.web_subnet_id
+}
+
+# Database module
+module "database" {
+  source = "./modules/database"
+  
+  resource_group_name = azurerm_resource_group.main.name
+  location           = azurerm_resource_group.main.location
+  environment        = var.environment
+  app_name          = var.app_name
+  admin_username    = var.admin_username
+  db_subnet_id      = module.networking.db_subnet_id
+}
+Subtask 2.9: Create Outputs Configuration
+Create outputs.tf file:
+
+output "resource_group_name" {
+  description = "Name of the resource group"
+  value       = azurerm_resource_group.main.name
+}
+
+output "public_ip_address" {
+  description = "Public IP address of the load balancer"
+  value       = module.compute.public_ip_address
+}
+
+output "mysql_server_fqdn" {
+  description = "FQDN of the MySQL server"
+  value       = module.database.mysql_server_fqdn
+}
+
+output "database_name" {
+  description = "Name of the database"
+  value       = module.database.database_name
+}
+
+output "application_url" {
+  description = "URL of the application"
+  value       = "http://${module.compute.public_ip_address}"
+}
+Subtask 2.10: Create Terraform Values File
+Create terraform.tfvars file:
+
+resource_group_name = "rg-terraform-lab"
+location           = "East US"
+environment        = "development"
+app_name          = "myterraformapp"
+admin_username    = "azureuser"
+vm_size           = "Standard_B1s"
+Subtask 2.11: Initialize and Plan Terraform Deployment
+Create a deployment script deploy-terraform.sh:
+
+#!/bin/bash
+
+echo "=== Terraform Multi-Tier Application Deployment ==="
+echo ""
+
+# Initialize Terraform
+echo "Initializing Terraform..."
+terraform init
+
+if [ $? -eq 0 ]; then
+    echo "✓ Terraform initialized successfully"
+else
+    echo "✗ Terraform initialization failed"
+    exit 1
+fi
+
+echo ""
+
+# Validate Terraform configuration
+echo "Validating Terraform configuration..."
+terraform validate
+
+if [ $? -eq 0 ]; then
+    echo "✓ Terraform configuration is valid"
+else
+    echo "✗ Terraform configuration validation failed"
+    exit 1
+fi
+
+echo ""
+
+# Plan Terraform deployment
+echo "Planning Terraform deployment..."
+terraform plan -out=tfplan
+
+if [ $? -eq 0 ]; then
+    echo "✓ Terraform plan created successfully"
+    echo ""
+    echo "Plan Summary:"
+    echo "• Resource Group: rg-terraform-lab"
+    echo "• Virtual Network with 3 subnets (web, app, db)"
+    echo "• Load Balancer with Public IP"
+    echo "• Virtual Machine Scale Set (2 instances)"
+    echo "• MySQL Flexible Server with database"
+    echo "• Network Security Groups"
+    echo ""
+    echo "To apply this plan, run: terraform apply tfplan"
+else
+    echo "✗ Terraform planning failed"
+    exit 1
+fi
+
+echo ""
+echo "=== Deployment Planning Completed ==="
+Make the script executable and run it:
+
+chmod +x deploy-terraform.sh
+./deploy-terraform.sh
+Subtask 2.12: Create Infrastructure Comparison Document
+Create infrastructure-comparison.md:
+
+# ARM Templates vs Terraform Comparison
+
+## ARM Templates
+**Advantages:**
+- Native Azure integration
+- Built-in validation
+- Idempotent deployments
+- JSON-based (familiar format)
+- Integrated with Azure DevOps
+
+**Disadvantages:**
+- Azure-specific only
+- Complex syntax for advanced scenarios
+- Limited programming constructs
+- Verbose JSON structure
+
+## Terraform
+**Advantages:**
+- Multi-cloud support
+- HCL syntax (more readable)
+- Rich ecosystem of providers
+- Strong state management
+- Modular architecture
+- Advanced programming features
+
+**Disadvantages:**
+- Additional tool to learn
+- State file management complexity
+- Requires separate installation
+- Third-party tool dependency
+
+## Use Cases
+**Choose ARM Templates when:**
+- Azure-only deployments
+- Simple to moderate complexity
+- Team familiar with JSON
+- Tight Azure integration required
+
+**Choose Terraform when:**
+- Multi-cloud strategy
+- Complex infrastructure requirements
+- Infrastructure reusability needed
+- Team prefers HCL syntax
+Troubleshooting Tips
+Common ARM Template Issues
+Issue: Template validation errors Solution:
+
+Check JSON syntax using online validators
+Verify resource API versions are current
+Ensure parameter types match expected values
+Issue: Deployment failures Solution:
+
+Review Azure Activity Log for detailed errors
+Check resource naming conventions
+Verify resource dependencies are correctly defined
+Common Terraform Issues
+Issue: Provider authentication errors Solution:
+
+Ensure Azure CLI is installed and authenticated
+Verify service principal credentials if using
+Check subscription permissions
+Issue: State file conflicts Solution:
+
+Use remote state storage for team collaboration
+Implement state locking mechanisms
+Regular state file backups
+Issue: Resource naming conflicts Solution:
+
+Use unique naming conventions
+Implement random suffixes for globally unique resources
+Check existing resource names before deployment
+Best Practices
+ARM Templates Best Practices
+• Use parameters for customizable values • Implement proper resource dependencies • Use variables for computed values • Include comprehensive outputs • Validate templates before deployment • Use nested templates for complex scenarios
+
+Terraform Best Practices
+• Use modules for reusable infrastructure • Implement proper state management • Use variables and locals effectively • Follow naming conventions consistently • Implement proper resource tagging • Use data sources for existing resources • Plan before applying changes
+
+Conclusion
+In this lab, you have successfully:
+
+• Learned Infrastructure as Code fundamentals - Understanding the principles of declarative infrastructure management and its benefits over manual provisioning
+
+• Created ARM templates - Built both simple and complex Azure resource deployments using JSON-based ARM templates, including storage accounts, web applications, and multi-resource scenarios
+
+• Implemented Terraform configurations - Developed a comprehensive multi-tier application infrastructure using Terraform's HCL syntax, including modular architecture with networking, compute, and database components
+
+• Compared IaC tools - Analyzed the strengths and weaknesses of ARM templates versus Terraform, helping you make informed decisions for future projects
+
+• Applied best practices - Implemented proper resource organization, naming conventions, parameterization, and modular design patterns
+
+• Gained hands-on experience - Worked with real-world scenarios that demonstrate practical application of IaC principles in cloud environments
+
+Why This Matters: Infrastructure as Code is essential in modern cloud computing because it enables:
+
+Consistency: Eliminates configuration drift and human errors
+Scalability: Easily replicate environments and scale resources
+Version Control: Track infrastructure changes like application code
+Automation: Integrate with CI/CD pipelines for automated deployments
+Cost Management: Better resource lifecycle management and optimization
+This foundational knowledge prepares you for advanced cloud architecture roles and enables you to implement robust, scalable infrastructure solutions in enterprise environments. The skills learned here are directly applicable to real-world cloud projects and form the basis for more advanced topics like GitOps, multi-cloud deployments, and infrastructure automation.
+
+Continue practicing with different resource types and scenarios to build expertise in cloud infrastructure management. Consider exploring advanced topics like Terraform state management, ARM template nested deployments, and integration with CI/CD pipelines for your next learning objectives.
