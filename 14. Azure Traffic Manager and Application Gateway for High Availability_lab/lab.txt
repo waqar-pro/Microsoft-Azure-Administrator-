@@ -1,0 +1,579 @@
+Lab 4: Azure Traffic Manager and Application Gateway for High Availability
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the concepts of global load balancing and traffic routing • Implement Traffic Manager profiles for global routing using open-source alternatives • Set up an Application Gateway with Web Application Firewall (WAF) functionality • Configure high availability web applications using load balancing techniques • Monitor and test traffic distribution across multiple endpoints • Implement basic security policies for web applications
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of web servers and HTTP protocols • Familiarity with Linux command line operations • Basic knowledge of networking concepts (DNS, IP addresses, ports) • Understanding of load balancing concepts • Access to a Linux-based system or virtual machine
+
+Ready-to-Use Cloud Machines
+Al Nafi provides pre-configured Linux-based cloud machines for this lab. Simply click Start Lab to access your environment. No need to build or configure your own virtual machine - everything is ready to use!
+
+Your lab environment includes: • Ubuntu 20.04 LTS with necessary tools pre-installed • Docker and Docker Compose • HAProxy for load balancing • Nginx web servers • Network monitoring tools
+
+Task 1: Implement Traffic Manager Profiles for Global Routing
+Subtask 1.1: Set Up Multiple Web Server Endpoints
+First, we'll create multiple web servers to simulate different geographic regions.
+
+Step 1: Create directory structure
+
+mkdir -p ~/traffic-manager-lab
+cd ~/traffic-manager-lab
+mkdir -p web-servers/region-east web-servers/region-west web-servers/region-central
+Step 2: Create web content for different regions
+
+Create content for East region:
+
+cat > web-servers/region-east/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>East Region Server</title>
+    <style>
+        body { font-family: Arial; text-align: center; background-color: #e3f2fd; }
+        .container { margin-top: 100px; }
+        .region { color: #1976d2; font-size: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="region">East Region Server</h1>
+        <p>Server Location: US-East</p>
+        <p>Server ID: EAST-001</p>
+        <p>Status: Active</p>
+    </div>
+</body>
+</html>
+EOF
+Create content for West region:
+
+cat > web-servers/region-west/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>West Region Server</title>
+    <style>
+        body { font-family: Arial; text-align: center; background-color: #f3e5f5; }
+        .container { margin-top: 100px; }
+        .region { color: #7b1fa2; font-size: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="region">West Region Server</h1>
+        <p>Server Location: US-West</p>
+        <p>Server ID: WEST-001</p>
+        <p>Status: Active</p>
+    </div>
+</body>
+</html>
+EOF
+Create content for Central region:
+
+cat > web-servers/region-central/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Central Region Server</title>
+    <style>
+        body { font-family: Arial; text-align: center; background-color: #e8f5e8; }
+        .container { margin-top: 100px; }
+        .region { color: #388e3c; font-size: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="region">Central Region Server</h1>
+        <p>Server Location: US-Central</p>
+        <p>Server ID: CENTRAL-001</p>
+        <p>Status: Active</p>
+    </div>
+</body>
+</html>
+EOF
+Subtask 1.2: Deploy Web Servers Using Docker
+Step 3: Create Docker Compose file for multiple web servers
+
+cat > docker-compose-webservers.yml << 'EOF'
+version: '3.8'
+
+services:
+  web-east:
+    image: nginx:alpine
+    container_name: web-east
+    ports:
+      - "8081:80"
+    volumes:
+      - ./web-servers/region-east:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-west:
+    image: nginx:alpine
+    container_name: web-west
+    ports:
+      - "8082:80"
+    volumes:
+      - ./web-servers/region-west:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-central:
+    image: nginx:alpine
+    container_name: web-central
+    ports:
+      - "8083:80"
+    volumes:
+      - ./web-servers/region-central:/usr/share/nginx/html
+    restart: unless-stopped
+EOF
+Step 4: Start the web servers
+
+docker-compose -f docker-compose-webservers.yml up -d
+Step 5: Verify web servers are running
+
+# Check container status
+docker ps
+
+# Test each server
+curl http://localhost:8081
+curl http://localhost:8082
+curl http://localhost:8083
+Subtask 1.3: Configure Traffic Manager Using HAProxy
+Step 6: Create HAProxy configuration for global routing
+
+cat > haproxy.cfg << 'EOF'
+global
+    daemon
+    maxconn 4096
+    log stdout local0
+
+defaults
+    mode http
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+    option httplog
+    log global
+
+# Frontend - Entry point for traffic
+frontend traffic_manager
+    bind *:80
+    # Route based on geographic headers or round-robin
+    default_backend web_servers
+
+# Backend - Pool of web servers
+backend web_servers
+    balance roundrobin
+    option httpchk GET /
+    
+    # Health checks and server definitions
+    server east-server 172.17.0.1:8081 check inter 2000ms rise 2 fall 3
+    server west-server 172.17.0.1:8082 check inter 2000ms rise 2 fall 3
+    server central-server 172.17.0.1:8083 check inter 2000ms rise 2 fall 3
+
+# Statistics page
+listen stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+EOF
+Step 7: Deploy HAProxy using Docker
+
+cat > docker-compose-haproxy.yml << 'EOF'
+version: '3.8'
+
+services:
+  haproxy:
+    image: haproxy:2.4-alpine
+    container_name: traffic-manager
+    ports:
+      - "80:80"
+      - "8404:8404"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - web-east
+      - web-west
+      - web-central
+    restart: unless-stopped
+
+  web-east:
+    image: nginx:alpine
+    container_name: web-east
+    ports:
+      - "8081:80"
+    volumes:
+      - ./web-servers/region-east:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-west:
+    image: nginx:alpine
+    container_name: web-west
+    ports:
+      - "8082:80"
+    volumes:
+      - ./web-servers/region-west:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-central:
+    image: nginx:alpine
+    container_name: web-central
+    ports:
+      - "8083:80"
+    volumes:
+      - ./web-servers/region-central:/usr/share/nginx/html
+    restart: unless-stopped
+EOF
+Step 8: Start the complete traffic manager setup
+
+# Stop previous containers
+docker-compose -f docker-compose-webservers.yml down
+
+# Start the complete setup
+docker-compose -f docker-compose-haproxy.yml up -d
+Subtask 1.4: Test Traffic Distribution
+Step 9: Test load balancing
+
+# Test multiple requests to see round-robin distribution
+for i in {1..6}; do
+    echo "Request $i:"
+    curl -s http://localhost | grep "Server Location"
+    echo "---"
+    sleep 1
+done
+Step 10: Monitor traffic manager statistics
+
+Open your web browser and navigate to:
+
+http://localhost:8404/stats
+This will show you the HAProxy statistics dashboard where you can monitor: • Server health status • Request distribution • Response times • Connection statistics
+
+Task 2: Set Up Application Gateway with Web Application Firewall (WAF)
+Subtask 2.1: Create Application Gateway Configuration
+Step 11: Create enhanced HAProxy configuration with WAF features
+
+cat > haproxy-waf.cfg << 'EOF'
+global
+    daemon
+    maxconn 4096
+    log stdout local0
+
+defaults
+    mode http
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+    option httplog
+    log global
+    option dontlognull
+
+# Frontend with WAF-like features
+frontend application_gateway
+    bind *:443
+    
+    # Security headers
+    http-response set-header X-Frame-Options DENY
+    http-response set-header X-Content-Type-Options nosniff
+    http-response set-header X-XSS-Protection "1; mode=block"
+    
+    # Block suspicious requests (Basic WAF rules)
+    # Block SQL injection attempts
+    http-request deny if { path_reg -i .*(union|select|insert|delete|drop|create|alter).* }
+    
+    # Block XSS attempts
+    http-request deny if { path_reg -i .*(<script|javascript:|vbscript:).* }
+    
+    # Block directory traversal
+    http-request deny if { path_reg -i .*(\.\.\/|\.\.\\).* }
+    
+    # Rate limiting (basic implementation)
+    stick-table type ip size 100k expire 30s store http_req_rate(10s)
+    http-request track-sc0 src
+    http-request deny if { sc_http_req_rate(0) gt 20 }
+    
+    # Route to backend
+    default_backend secure_web_servers
+
+# Secure backend configuration
+backend secure_web_servers
+    balance roundrobin
+    option httpchk GET /
+    
+    # Add security headers to backend responses
+    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    http-response set-header Content-Security-Policy "default-src 'self'"
+    
+    server east-server 172.17.0.1:8081 check inter 2000ms rise 2 fall 3
+    server west-server 172.17.0.1:8082 check inter 2000ms rise 2 fall 3
+    server central-server 172.17.0.1:8083 check inter 2000ms rise 2 fall 3
+
+# HTTP to HTTPS redirect
+frontend http_redirect
+    bind *:80
+    redirect scheme https code 301
+
+# Statistics with authentication
+listen stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+    # Basic auth for stats (admin:password)
+    stats auth admin:password
+EOF
+Subtask 2.2: Create SSL Certificates for HTTPS
+Step 12: Generate self-signed SSL certificates
+
+# Create SSL directory
+mkdir -p ssl
+
+# Generate private key
+openssl genrsa -out ssl/server.key 2048
+
+# Generate certificate signing request
+openssl req -new -key ssl/server.key -out ssl/server.csr -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+
+# Generate self-signed certificate
+openssl x509 -req -days 365 -in ssl/server.csr -signkey ssl/server.key -out ssl/server.crt
+
+# Combine certificate and key for HAProxy
+cat ssl/server.crt ssl/server.key > ssl/server.pem
+Subtask 2.3: Deploy Application Gateway with WAF
+Step 13: Create enhanced Docker Compose with SSL support
+
+cat > docker-compose-gateway.yml << 'EOF'
+version: '3.8'
+
+services:
+  application-gateway:
+    image: haproxy:2.4-alpine
+    container_name: application-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8404:8404"
+    volumes:
+      - ./haproxy-waf.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./ssl:/etc/ssl/certs:ro
+    depends_on:
+      - web-east
+      - web-west
+      - web-central
+    restart: unless-stopped
+
+  web-east:
+    image: nginx:alpine
+    container_name: web-east
+    ports:
+      - "8081:80"
+    volumes:
+      - ./web-servers/region-east:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-west:
+    image: nginx:alpine
+    container_name: web-west
+    ports:
+      - "8082:80"
+    volumes:
+      - ./web-servers/region-west:/usr/share/nginx/html
+    restart: unless-stopped
+
+  web-central:
+    image: nginx:alpine
+    container_name: web-central
+    ports:
+      - "8083:80"
+    volumes:
+      - ./web-servers/region-central:/usr/share/nginx/html
+    restart: unless-stopped
+EOF
+Step 14: Update HAProxy configuration to use SSL
+
+cat > haproxy-waf.cfg << 'EOF'
+global
+    daemon
+    maxconn 4096
+    log stdout local0
+
+defaults
+    mode http
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+    option httplog
+    log global
+    option dontlognull
+
+# HTTPS Frontend with WAF features
+frontend application_gateway
+    bind *:443 ssl crt /etc/ssl/certs/server.pem
+    
+    # Security headers
+    http-response set-header X-Frame-Options DENY
+    http-response set-header X-Content-Type-Options nosniff
+    http-response set-header X-XSS-Protection "1; mode=block"
+    
+    # WAF Rules - Block malicious requests
+    http-request deny if { path_reg -i .*(union|select|insert|delete|drop|create|alter).* }
+    http-request deny if { path_reg -i .*(<script|javascript:|vbscript:).* }
+    http-request deny if { path_reg -i .*(\.\.\/|\.\.\\).* }
+    
+    # Rate limiting
+    stick-table type ip size 100k expire 30s store http_req_rate(10s)
+    http-request track-sc0 src
+    http-request deny if { sc_http_req_rate(0) gt 20 }
+    
+    default_backend secure_web_servers
+
+# Backend with security headers
+backend secure_web_servers
+    balance roundrobin
+    option httpchk GET /
+    
+    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    http-response set-header Content-Security-Policy "default-src 'self'"
+    
+    server east-server web-east:80 check inter 2000ms rise 2 fall 3
+    server west-server web-west:80 check inter 2000ms rise 2 fall 3
+    server central-server web-central:80 check inter 2000ms rise 2 fall 3
+
+# HTTP to HTTPS redirect
+frontend http_redirect
+    bind *:80
+    redirect scheme https code 301
+
+# Statistics
+listen stats
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+    stats auth admin:password
+EOF
+Step 15: Deploy the Application Gateway
+
+# Stop previous setup
+docker-compose -f docker-compose-haproxy.yml down
+
+# Start the Application Gateway
+docker-compose -f docker-compose-gateway.yml up -d
+Subtask 2.4: Test WAF Functionality
+Step 16: Test normal traffic
+
+# Test HTTPS access (ignore SSL warnings for self-signed cert)
+curl -k https://localhost
+
+# Test HTTP redirect
+curl -I http://localhost
+Step 17: Test WAF protection
+
+# Test SQL injection protection
+curl -k "https://localhost/?id=1' UNION SELECT * FROM users--"
+
+# Test XSS protection
+curl -k "https://localhost/?search=<script>alert('xss')</script>"
+
+# Test directory traversal protection
+curl -k "https://localhost/../../../etc/passwd"
+Step 18: Test rate limiting
+
+# Generate rapid requests to trigger rate limiting
+for i in {1..25}; do
+    curl -k -s https://localhost > /dev/null
+    echo "Request $i sent"
+done
+Subtask 2.5: Monitor and Analyze Traffic
+Step 19: Access monitoring dashboard
+
+Open your web browser and navigate to:
+
+http://localhost:8404/stats
+Login credentials: • Username: admin • Password: password
+
+Step 20: Create a simple monitoring script
+
+cat > monitor_traffic.sh << 'EOF'
+#!/bin/bash
+
+echo "Traffic Manager Monitoring"
+echo "========================="
+echo
+
+# Check container status
+echo "Container Status:"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+echo
+
+# Test connectivity to each backend
+echo "Backend Health Check:"
+for port in 8081 8082 8083; do
+    if curl -s http://localhost:$port > /dev/null; then
+        echo "Port $port: HEALTHY"
+    else
+        echo "Port $port: UNHEALTHY"
+    fi
+done
+echo
+
+# Show recent logs
+echo "Recent HAProxy Logs:"
+docker logs application-gateway --tail 10
+EOF
+
+chmod +x monitor_traffic.sh
+Step 21: Run monitoring script
+
+./monitor_traffic.sh
+Troubleshooting Tips
+Common Issues and Solutions
+Issue 1: Containers not starting
+
+# Check Docker status
+sudo systemctl status docker
+
+# Check container logs
+docker logs <container_name>
+
+# Restart Docker if needed
+sudo systemctl restart docker
+Issue 2: Port conflicts
+
+# Check what's using the port
+sudo netstat -tulpn | grep :80
+
+# Kill process using the port
+sudo kill -9 <process_id>
+Issue 3: SSL certificate issues
+
+# Regenerate certificates
+rm -rf ssl/
+mkdir ssl
+# Repeat certificate generation steps
+Issue 4: HAProxy configuration errors
+
+# Test HAProxy configuration
+docker run --rm -v $(pwd)/haproxy-waf.cfg:/tmp/haproxy.cfg haproxy:2.4-alpine haproxy -c -f /tmp/haproxy.cfg
+Conclusion
+In this lab, you have successfully:
+
+• Implemented Traffic Manager functionality using HAProxy to distribute traffic across multiple web servers in different simulated regions • Set up load balancing with health checks and automatic failover capabilities • Configured Application Gateway with WAF features including SQL injection protection, XSS prevention, and rate limiting • Implemented SSL/TLS encryption for secure communication • Created monitoring and statistics dashboards to track traffic distribution and server health • Tested security features to ensure protection against common web attacks
+
+Why This Matters
+High Availability: By distributing traffic across multiple servers, you ensure that your application remains available even if one server fails.
+
+Security: The WAF functionality protects your applications from common web attacks, making them more secure.
+
+Performance: Load balancing improves response times by distributing the workload efficiently.
+
+Scalability: This architecture allows you to easily add more servers as your application grows.
+
+Monitoring: Real-time statistics help you understand traffic patterns and identify issues quickly.
+
+This lab demonstrates how open-source tools like HAProxy and Docker can provide enterprise-level traffic management and security features, making high availability accessible to organizations of all sizes. The skills learned here are directly applicable to real-world scenarios where you need to ensure your web applications are both highly available and secure.
