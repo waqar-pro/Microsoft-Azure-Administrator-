@@ -1,0 +1,785 @@
+Lab 5: Azure Cosmos DB Clustering and Replication
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the fundamentals of Azure Cosmos DB global distribution and replication • Create and configure a globally distributed Cosmos DB instance using Azure CLI • Implement multi-region read and write configurations • Test failover scenarios and measure performance metrics • Use open-source monitoring tools to analyze database latency and availability • Troubleshoot common replication and clustering issues
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of NoSQL databases and JSON document structure • Familiarity with command-line interfaces and basic Linux commands • Knowledge of HTTP requests and REST API concepts • Understanding of network latency and geographic distribution concepts • Basic knowledge of database operations (CRUD operations)
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines. Simply click Start Lab to begin - no need to build your own VM or install additional software.
+
+Lab Environment Setup
+Your Al Nafi cloud machine comes pre-configured with: • Azure CLI (latest version) • curl and wget utilities • Python 3 with pip package manager • Node.js and npm • Git version control • Text editors (nano, vim)
+
+Task 1: Create a Globally Distributed Cosmos DB Instance
+Subtask 1.1: Install Required Tools and Login to Azure
+First, let's ensure all necessary tools are installed and authenticate with Azure.
+
+# Update system packages
+sudo apt update
+
+# Install Azure CLI if not present
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+# Verify Azure CLI installation
+az --version
+
+# Login to Azure (this will open a browser for authentication)
+az login
+
+# Set your subscription (replace with your subscription ID)
+az account set --subscription "your-subscription-id"
+
+# Verify current subscription
+az account show --output table
+Subtask 1.2: Create Resource Group and Cosmos DB Account
+# Set variables for consistent naming
+RESOURCE_GROUP="cosmosdb-lab-rg"
+LOCATION_PRIMARY="East US"
+LOCATION_SECONDARY="West Europe"
+LOCATION_TERTIARY="Southeast Asia"
+COSMOS_ACCOUNT="cosmosdb-global-$(date +%s)"
+DATABASE_NAME="GlobalTestDB"
+CONTAINER_NAME="TestContainer"
+
+# Create resource group
+az group create \
+    --name $RESOURCE_GROUP \
+    --location "$LOCATION_PRIMARY"
+
+# Create Cosmos DB account with multiple regions
+az cosmosdb create \
+    --resource-group $RESOURCE_GROUP \
+    --name $COSMOS_ACCOUNT \
+    --kind GlobalDocumentDB \
+    --locations regionName="$LOCATION_PRIMARY" failoverPriority=0 isZoneRedundant=False \
+    --locations regionName="$LOCATION_SECONDARY" failoverPriority=1 isZoneRedundant=False \
+    --locations regionName="$LOCATION_TERTIARY" failoverPriority=2 isZoneRedundant=False \
+    --default-consistency-level "Session" \
+    --enable-multiple-write-locations true \
+    --enable-automatic-failover true
+
+# Wait for account creation to complete
+echo "Waiting for Cosmos DB account creation to complete..."
+sleep 60
+Subtask 1.3: Create Database and Container
+# Create database
+az cosmosdb sql database create \
+    --account-name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --name $DATABASE_NAME
+
+# Create container with partition key
+az cosmosdb sql container create \
+    --account-name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --database-name $DATABASE_NAME \
+    --name $CONTAINER_NAME \
+    --partition-key-path "/region" \
+    --throughput 400
+
+# Get connection details
+az cosmosdb keys list \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --type keys
+
+# Get connection string
+CONNECTION_STRING=$(az cosmosdb keys list \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --type connection-strings \
+    --query 'connectionStrings[0].connectionString' \
+    --output tsv)
+
+echo "Connection String: $CONNECTION_STRING"
+Subtask 1.4: Verify Global Distribution Setup
+# Check account regions and failover policies
+az cosmosdb show \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --query '{locations:locations,consistencyPolicy:consistencyPolicy,enableMultipleWriteLocations:enableMultipleWriteLocations}'
+
+# List all read and write locations
+az cosmosdb list-read-only-keys \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP
+
+# Get account endpoints
+ACCOUNT_ENDPOINT=$(az cosmosdb show \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --query 'documentEndpoint' \
+    --output tsv)
+
+echo "Primary Endpoint: $ACCOUNT_ENDPOINT"
+Task 2: Test Failover Scenarios and Measure Latency
+Subtask 2.1: Install Performance Testing Tools
+# Install Python packages for testing
+pip3 install azure-cosmos requests matplotlib pandas numpy
+
+# Install Node.js packages for additional testing
+npm install -g azure-cosmosdb-benchmark
+
+# Create a Python script for latency testing
+cat > latency_test.py << 'EOF'
+import time
+import requests
+import json
+import statistics
+from azure.cosmos import CosmosClient, PartitionKey
+import threading
+from datetime import datetime
+
+class CosmosLatencyTester:
+    def __init__(self, endpoint, key, database_name, container_name):
+        self.client = CosmosClient(endpoint, key)
+        self.database = self.client.get_database_client(database_name)
+        self.container = self.database.get_container_client(container_name)
+        self.results = []
+    
+    def test_write_latency(self, num_operations=10):
+        """Test write operation latency"""
+        latencies = []
+        
+        for i in range(num_operations):
+            start_time = time.time()
+            
+            document = {
+                'id': f'test-doc-{i}-{int(time.time())}',
+                'region': 'test-region',
+                'data': f'Test data for document {i}',
+                'timestamp': datetime.now().isoformat(),
+                'operation_number': i
+            }
+            
+            try:
+                self.container.create_item(body=document)
+                end_time = time.time()
+                latency = (end_time - start_time) * 1000  # Convert to milliseconds
+                latencies.append(latency)
+                print(f"Write {i+1}: {latency:.2f}ms")
+            except Exception as e:
+                print(f"Write operation {i+1} failed: {e}")
+        
+        return latencies
+    
+    def test_read_latency(self, num_operations=10):
+        """Test read operation latency"""
+        latencies = []
+        
+        # First, create some test documents
+        test_docs = []
+        for i in range(5):
+            doc = {
+                'id': f'read-test-{i}',
+                'region': 'read-test-region',
+                'data': f'Read test data {i}'
+            }
+            self.container.create_item(body=doc)
+            test_docs.append(doc['id'])
+        
+        # Now test read latency
+        for i in range(num_operations):
+            doc_id = test_docs[i % len(test_docs)]
+            start_time = time.time()
+            
+            try:
+                self.container.read_item(item=doc_id, partition_key='read-test-region')
+                end_time = time.time()
+                latency = (end_time - start_time) * 1000
+                latencies.append(latency)
+                print(f"Read {i+1}: {latency:.2f}ms")
+            except Exception as e:
+                print(f"Read operation {i+1} failed: {e}")
+        
+        return latencies
+    
+    def run_comprehensive_test(self):
+        """Run comprehensive latency tests"""
+        print("Starting Cosmos DB Latency Tests...")
+        print("=" * 50)
+        
+        # Test write latency
+        print("\n1. Testing Write Latency:")
+        write_latencies = self.test_write_latency(20)
+        
+        if write_latencies:
+            print(f"Write Latency Stats:")
+            print(f"  Average: {statistics.mean(write_latencies):.2f}ms")
+            print(f"  Median: {statistics.median(write_latencies):.2f}ms")
+            print(f"  Min: {min(write_latencies):.2f}ms")
+            print(f"  Max: {max(write_latencies):.2f}ms")
+        
+        # Test read latency
+        print("\n2. Testing Read Latency:")
+        read_latencies = self.test_read_latency(20)
+        
+        if read_latencies:
+            print(f"Read Latency Stats:")
+            print(f"  Average: {statistics.mean(read_latencies):.2f}ms")
+            print(f"  Median: {statistics.median(read_latencies):.2f}ms")
+            print(f"  Min: {min(read_latencies):.2f}ms")
+            print(f"  Max: {max(read_latencies):.2f}ms")
+        
+        return write_latencies, read_latencies
+
+if __name__ == "__main__":
+    # These will be set from environment variables
+    import os
+    
+    endpoint = os.environ.get('COSMOS_ENDPOINT')
+    key = os.environ.get('COSMOS_KEY')
+    database_name = os.environ.get('DATABASE_NAME', 'GlobalTestDB')
+    container_name = os.environ.get('CONTAINER_NAME', 'TestContainer')
+    
+    if not endpoint or not key:
+        print("Please set COSMOS_ENDPOINT and COSMOS_KEY environment variables")
+        exit(1)
+    
+    tester = CosmosLatencyTester(endpoint, key, database_name, container_name)
+    tester.run_comprehensive_test()
+EOF
+
+chmod +x latency_test.py
+Subtask 2.2: Set Environment Variables and Run Initial Tests
+# Get the primary key
+PRIMARY_KEY=$(az cosmosdb keys list \
+    --name $COSMOS_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --type keys \
+    --query 'primaryMasterKey' \
+    --output tsv)
+
+# Set environment variables
+export COSMOS_ENDPOINT=$ACCOUNT_ENDPOINT
+export COSMOS_KEY=$PRIMARY_KEY
+export DATABASE_NAME=$DATABASE_NAME
+export CONTAINER_NAME=$CONTAINER_NAME
+
+# Run initial latency test
+echo "Running initial latency test..."
+python3 latency_test.py
+Subtask 2.3: Create Failover Testing Script
+# Create failover testing script
+cat > failover_test.py << 'EOF'
+import time
+import requests
+import json
+from azure.cosmos import CosmosClient
+from datetime import datetime
+import threading
+import subprocess
+
+class FailoverTester:
+    def __init__(self, endpoint, key, database_name, container_name, resource_group, account_name):
+        self.client = CosmosClient(endpoint, key)
+        self.database = self.client.get_database_client(database_name)
+        self.container = self.database.get_container_client(container_name)
+        self.resource_group = resource_group
+        self.account_name = account_name
+        self.is_testing = False
+        self.operation_results = []
+    
+    def continuous_operations(self, duration_seconds=300):
+        """Perform continuous read/write operations during failover"""
+        self.is_testing = True
+        start_time = time.time()
+        operation_count = 0
+        
+        while self.is_testing and (time.time() - start_time) < duration_seconds:
+            try:
+                # Write operation
+                doc = {
+                    'id': f'failover-test-{operation_count}-{int(time.time())}',
+                    'region': 'failover-test',
+                    'timestamp': datetime.now().isoformat(),
+                    'operation': operation_count
+                }
+                
+                write_start = time.time()
+                self.container.create_item(body=doc)
+                write_time = (time.time() - write_start) * 1000
+                
+                # Read operation
+                read_start = time.time()
+                self.container.read_item(item=doc['id'], partition_key='failover-test')
+                read_time = (time.time() - read_start) * 1000
+                
+                result = {
+                    'timestamp': datetime.now().isoformat(),
+                    'operation': operation_count,
+                    'write_latency': write_time,
+                    'read_latency': read_time,
+                    'status': 'success'
+                }
+                
+                self.operation_results.append(result)
+                print(f"Op {operation_count}: Write={write_time:.2f}ms, Read={read_time:.2f}ms")
+                
+            except Exception as e:
+                result = {
+                    'timestamp': datetime.now().isoformat(),
+                    'operation': operation_count,
+                    'error': str(e),
+                    'status': 'failed'
+                }
+                self.operation_results.append(result)
+                print(f"Op {operation_count}: FAILED - {e}")
+            
+            operation_count += 1
+            time.sleep(2)  # Wait 2 seconds between operations
+        
+        self.is_testing = False
+        return self.operation_results
+    
+    def trigger_manual_failover(self, new_primary_region):
+        """Trigger manual failover to specified region"""
+        try:
+            print(f"Triggering manual failover to {new_primary_region}...")
+            
+            # Use Azure CLI to trigger failover
+            cmd = [
+                'az', 'cosmosdb', 'failover-priority-change',
+                '--resource-group', self.resource_group,
+                '--name', self.account_name,
+                '--failover-policies', f'{new_primary_region}=0', 'East US=1', 'Southeast Asia=2'
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                print("Failover initiated successfully")
+                return True
+            else:
+                print(f"Failover failed: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"Error triggering failover: {e}")
+            return False
+    
+    def run_failover_test(self):
+        """Run complete failover test scenario"""
+        print("Starting Failover Test Scenario")
+        print("=" * 50)
+        
+        # Start continuous operations in background
+        print("1. Starting continuous operations...")
+        operations_thread = threading.Thread(
+            target=self.continuous_operations,
+            args=(300,)  # Run for 5 minutes
+        )
+        operations_thread.start()
+        
+        # Wait for operations to stabilize
+        time.sleep(30)
+        
+        # Trigger failover
+        print("2. Triggering failover to West Europe...")
+        failover_success = self.trigger_manual_failover("West Europe")
+        
+        if failover_success:
+            print("3. Failover initiated. Monitoring operations...")
+            # Let operations continue for another 2 minutes
+            time.sleep(120)
+        
+        # Stop operations
+        print("4. Stopping continuous operations...")
+        self.is_testing = False
+        operations_thread.join()
+        
+        # Analyze results
+        self.analyze_results()
+    
+    def analyze_results(self):
+        """Analyze failover test results"""
+        if not self.operation_results:
+            print("No operation results to analyze")
+            return
+        
+        successful_ops = [r for r in self.operation_results if r['status'] == 'success']
+        failed_ops = [r for r in self.operation_results if r['status'] == 'failed']
+        
+        print("\nFailover Test Results:")
+        print(f"Total Operations: {len(self.operation_results)}")
+        print(f"Successful Operations: {len(successful_ops)}")
+        print(f"Failed Operations: {len(failed_ops)}")
+        print(f"Success Rate: {(len(successful_ops)/len(self.operation_results))*100:.2f}%")
+        
+        if successful_ops:
+            write_latencies = [op['write_latency'] for op in successful_ops]
+            read_latencies = [op['read_latency'] for op in successful_ops]
+            
+            print(f"\nLatency Statistics:")
+            print(f"Average Write Latency: {sum(write_latencies)/len(write_latencies):.2f}ms")
+            print(f"Average Read Latency: {sum(read_latencies)/len(read_latencies):.2f}ms")
+        
+        # Save results to file
+        with open('failover_test_results.json', 'w') as f:
+            json.dump(self.operation_results, f, indent=2)
+        
+        print("\nDetailed results saved to 'failover_test_results.json'")
+
+if __name__ == "__main__":
+    import os
+    
+    endpoint = os.environ.get('COSMOS_ENDPOINT')
+    key = os.environ.get('COSMOS_KEY')
+    database_name = os.environ.get('DATABASE_NAME')
+    container_name = os.environ.get('CONTAINER_NAME')
+    resource_group = os.environ.get('RESOURCE_GROUP')
+    account_name = os.environ.get('COSMOS_ACCOUNT')
+    
+    if not all([endpoint, key, database_name, container_name, resource_group, account_name]):
+        print("Please set all required environment variables")
+        exit(1)
+    
+    tester = FailoverTester(endpoint, key, database_name, container_name, resource_group, account_name)
+    tester.run_failover_test()
+EOF
+
+chmod +x failover_test.py
+Subtask 2.4: Run Failover Test
+# Set additional environment variables
+export RESOURCE_GROUP=$RESOURCE_GROUP
+export COSMOS_ACCOUNT=$COSMOS_ACCOUNT
+
+# Run failover test (this will take about 5 minutes)
+echo "Starting failover test scenario..."
+echo "This test will run continuous operations while triggering a failover"
+echo "Expected duration: 5 minutes"
+
+python3 failover_test.py
+Subtask 2.5: Monitor and Analyze Performance
+# Create monitoring script
+cat > monitor_cosmos.py << 'EOF'
+import time
+import requests
+import json
+from datetime import datetime, timedelta
+import subprocess
+
+class CosmosMonitor:
+    def __init__(self, resource_group, account_name):
+        self.resource_group = resource_group
+        self.account_name = account_name
+    
+    def get_metrics(self):
+        """Get Cosmos DB metrics using Azure CLI"""
+        try:
+            # Get account status
+            cmd = [
+                'az', 'cosmosdb', 'show',
+                '--resource-group', self.resource_group,
+                '--name', self.account_name,
+                '--query', '{locations:locations,consistencyPolicy:consistencyPolicy,enableMultipleWriteLocations:enableMultipleWriteLocations}'
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                account_info = json.loads(result.stdout)
+                return account_info
+            else:
+                print(f"Error getting metrics: {result.stderr}")
+                return None
+                
+        except Exception as e:
+            print(f"Error in get_metrics: {e}")
+            return None
+    
+    def check_region_health(self):
+        """Check health of all regions"""
+        print("Checking region health...")
+        
+        metrics = self.get_metrics()
+        if not metrics:
+            return
+        
+        print("\nRegion Status:")
+        print("-" * 40)
+        
+        for location in metrics.get('locations', []):
+            region_name = location.get('locationName', 'Unknown')
+            failover_priority = location.get('failoverPriority', 'Unknown')
+            is_zone_redundant = location.get('isZoneRedundant', False)
+            
+            print(f"Region: {region_name}")
+            print(f"  Failover Priority: {failover_priority}")
+            print(f"  Zone Redundant: {is_zone_redundant}")
+            print()
+        
+        consistency_policy = metrics.get('consistencyPolicy', {})
+        print(f"Consistency Level: {consistency_policy.get('defaultConsistencyLevel', 'Unknown')}")
+        print(f"Multiple Write Locations: {metrics.get('enableMultipleWriteLocations', False)}")
+    
+    def continuous_monitoring(self, duration_minutes=10):
+        """Monitor Cosmos DB continuously"""
+        print(f"Starting continuous monitoring for {duration_minutes} minutes...")
+        
+        start_time = time.time()
+        end_time = start_time + (duration_minutes * 60)
+        
+        while time.time() < end_time:
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Monitoring Check")
+            self.check_region_health()
+            
+            remaining_time = int((end_time - time.time()) / 60)
+            print(f"Monitoring continues for {remaining_time} more minutes...")
+            
+            time.sleep(60)  # Check every minute
+        
+        print("Monitoring completed.")
+
+if __name__ == "__main__":
+    import os
+    
+    resource_group = os.environ.get('RESOURCE_GROUP')
+    account_name = os.environ.get('COSMOS_ACCOUNT')
+    
+    if not resource_group or not account_name:
+        print("Please set RESOURCE_GROUP and COSMOS_ACCOUNT environment variables")
+        exit(1)
+    
+    monitor = CosmosMonitor(resource_group, account_name)
+    monitor.continuous_monitoring(5)  # Monitor for 5 minutes
+EOF
+
+chmod +x monitor_cosmos.py
+
+# Run monitoring
+echo "Starting Cosmos DB monitoring..."
+python3 monitor_cosmos.py
+Subtask 2.6: Performance Comparison Test
+# Create performance comparison script
+cat > performance_comparison.py << 'EOF'
+import time
+import statistics
+from azure.cosmos import CosmosClient
+from datetime import datetime
+import concurrent.futures
+import threading
+
+class PerformanceComparison:
+    def __init__(self, endpoint, key, database_name, container_name):
+        self.client = CosmosClient(endpoint, key)
+        self.database = self.client.get_database_client(database_name)
+        self.container = self.database.get_container_client(container_name)
+    
+    def single_threaded_test(self, num_operations=50):
+        """Test performance with single thread"""
+        print("Running single-threaded test...")
+        
+        latencies = []
+        start_time = time.time()
+        
+        for i in range(num_operations):
+            doc = {
+                'id': f'single-thread-{i}-{int(time.time())}',
+                'region': 'performance-test',
+                'data': f'Single thread test data {i}',
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            op_start = time.time()
+            try:
+                self.container.create_item(body=doc)
+                op_end = time.time()
+                latencies.append((op_end - op_start) * 1000)
+            except Exception as e:
+                print(f"Operation {i} failed: {e}")
+        
+        total_time = time.time() - start_time
+        
+        return {
+            'total_time': total_time,
+            'operations': num_operations,
+            'throughput': num_operations / total_time,
+            'latencies': latencies,
+            'avg_latency': statistics.mean(latencies) if latencies else 0,
+            'median_latency': statistics.median(latencies) if latencies else 0
+        }
+    
+    def multi_threaded_test(self, num_operations=50, num_threads=5):
+        """Test performance with multiple threads"""
+        print(f"Running multi-threaded test with {num_threads} threads...")
+        
+        operations_per_thread = num_operations // num_threads
+        all_latencies = []
+        results_lock = threading.Lock()
+        
+        def worker_thread(thread_id, operations):
+            thread_latencies = []
+            
+            for i in range(operations):
+                doc = {
+                    'id': f'multi-thread-{thread_id}-{i}-{int(time.time())}',
+                    'region': 'performance-test',
+                    'data': f'Multi thread test data {thread_id}-{i}',
+                    'timestamp': datetime.now().isoformat(),
+                    'thread_id': thread_id
+                }
+                
+                op_start = time.time()
+                try:
+                    self.container.create_item(body=doc)
+                    op_end = time.time()
+                    thread_latencies.append((op_end - op_start) * 1000)
+                except Exception as e:
+                    print(f"Thread {thread_id}, Operation {i} failed: {e}")
+            
+            with results_lock:
+                all_latencies.extend(thread_latencies)
+        
+        start_time = time.time()
+        
+        # Create and start threads
+        threads = []
+        for thread_id in range(num_threads):
+            thread = threading.Thread(
+                target=worker_thread,
+                args=(thread_id, operations_per_thread)
+            )
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        total_time = time.time() - start_time
+        actual_operations = len(all_latencies)
+        
+        return {
+            'total_time': total_time,
+            'operations': actual_operations,
+            'throughput': actual_operations / total_time,
+            'latencies': all_latencies,
+            'avg_latency': statistics.mean(all_latencies) if all_latencies else 0,
+            'median_latency': statistics.median(all_latencies) if all_latencies else 0,
+            'threads': num_threads
+        }
+    
+    def run_comparison(self):
+        """Run complete performance comparison"""
+        print("Cosmos DB Performance Comparison Test")
+        print("=" * 50)
+        
+        # Single-threaded test
+        single_results = self.single_threaded_test(50)
+        
+        # Multi-threaded test
+        multi_results = self.multi_threaded_test(50, 5)
+        
+        # Display results
+        print("\nPerformance Comparison Results:")
+        print("-" * 40)
+        
+        print(f"\nSingle-Threaded Test:")
+        print(f"  Total Time: {single_results['total_time']:.2f} seconds")
+        print(f"  Operations: {single_results['operations']}")
+        print(f"  Throughput: {single_results['throughput']:.2f} ops/sec")
+        print(f"  Average Latency: {single_results['avg_latency']:.2f}ms")
+        print(f"  Median Latency: {single_results['median_latency']:.2f}ms")
+        
+        print(f"\nMulti-Threaded Test ({multi_results['threads']} threads):")
+        print(f"  Total Time: {multi_results['total_time']:.2f} seconds")
+        print(f"  Operations: {multi_results['operations']}")
+        print(f"  Throughput: {multi_results['throughput']:.2f} ops/sec")
+        print(f"  Average Latency: {multi_results['avg_latency']:.2f}ms")
+        print(f"  Median Latency: {multi_results['median_latency']:.2f}ms")
+        
+        # Calculate improvement
+        throughput_improvement = (multi_results['throughput'] / single_results['throughput']) * 100
+        print(f"\nThroughput Improvement: {throughput_improvement:.1f}%")
+        
+        return single_results, multi_results
+
+if __name__ == "__main__":
+    import os
+    
+    endpoint = os.environ.get('COSMOS_ENDPOINT')
+    key = os.environ.get('COSMOS_KEY')
+    database_name = os.environ.get('DATABASE_NAME')
+    container_name = os.environ.get('CONTAINER_NAME')
+    
+    if not all([endpoint, key, database_name, container_name]):
+        print("Please set all required environment variables")
+        exit(1)
+    
+    tester = PerformanceComparison(endpoint, key, database_name, container_name)
+    tester.run_comparison()
+EOF
+
+chmod +x performance_comparison.py
+
+# Run performance comparison
+echo "Running performance comparison test..."
+python3 performance_comparison.py
+Task 3: Advanced Monitoring and Troubleshooting
+Subtask 3.1: Create Comprehensive Monitoring Dashboard
+# Create monitoring dashboard script
+cat > cosmos_dashboard.py << 'EOF'
+import time
+import json
+import subprocess
+from datetime import datetime
+import os
+
+class CosmosDashboard:
+    def __init__(self, resource_group, account_name):
+        self.resource_group = resource_group
+        self.account_name = account_name
+    
+    def get_account_info(self):
+        """Get comprehensive account information"""
+        try:
+            cmd = [
+                'az', 'cosmosdb', 'show',
+                '--resource-group', self.resource_group,
+                '--name', self.account_name
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                return json.loads(result.stdout)
+            else:
+                print(f"Error getting account info: {result.stderr}")
+                return None
+                
+        except Exception as e:
+            print(f"Error in get_account_info: {e}")
+            return None
+    
+    def display_dashboard(self):
+        """Display comprehensive dashboard"""
+        print("\n" + "="*60)
+        print("           COSMOS DB MONITORING DASHBOARD")
+        print("="*60)
+        print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Account: {self.account_name}")
+        print(f"Resource Group: {self.resource_group}")
+        
+        account_info = self.get_account_info()
+        if not account_info:
+            print("Unable to retrieve account information")
+            return
+        
+        # Basic account information
+        print(f"\nACCOUNT STATUS:")
+        print(f"  Provisioning State: {account_info.get('provisioningState', 'Unknown')}")
+        print(f"  Document Endpoint: {account_info.get('documentEndpoint', 'Unknown')}")
+        print(f"  Multiple Write Locations: {account_info.get('enableMultipleWriteLocations', False)}")
+        print(f"  Automatic Failover: {account_info.get('enableAutomaticFailover', False)}")
+        
+        # Consistency policy
+        consistency = account_info.get('consistencyPolicy', {})
+        print(f"\nCONSISTENCY POLICY:")
+        print(f"  Default Level: {consistency.get('defaultConsistencyLevel', 'Unknown')}")
+        print(f"  Max Staleness Prefix: {consistency.get('maxStalenessPrefix', 'N/A')}")
+        print(f"  Max Interval (seconds): {consistency.get('maxIntervalInSeconds', 'N/A
