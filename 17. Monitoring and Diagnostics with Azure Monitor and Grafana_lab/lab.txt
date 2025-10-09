@@ -1,0 +1,354 @@
+Lab 7: Monitoring and Diagnostics with Azure Monitor and Grafana
+Learning Objectives
+By the end of this lab, students will be able to:
+
+• Set up and configure Azure Monitor for collecting system metrics and logs • Install and configure Grafana on a local Linux environment • Create custom dashboards in Grafana to visualize system performance data • Integrate Azure Monitor data sources with Grafana for comprehensive monitoring • Implement alerting mechanisms for proactive system monitoring • Understand the fundamentals of observability and monitoring best practices
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of Linux command line operations • Familiarity with system monitoring concepts • Basic knowledge of web browsers and navigation • Understanding of JSON format and configuration files • Access to an Azure account (free tier is sufficient)
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own VM or install additional software initially.
+
+Your lab environment includes: • Ubuntu 20.04 LTS with sudo privileges • Internet connectivity for downloading packages • Pre-installed Docker and Docker Compose • Text editors (nano, vim)
+
+Task 1: Set up Advanced Monitoring using Azure Monitor and Log Analytics
+Subtask 1.1: Install Azure CLI and Configure Authentication
+First, we'll install the Azure CLI to interact with Azure services from our local environment.
+
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Install required dependencies
+sudo apt install -y curl apt-transport-https lsb-release gnupg
+
+# Add Microsoft signing key
+curl -sL https://packages.microsoft.com/keys/microsoft.asc | \
+    gpg --dearmor | \
+    sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+
+# Add Azure CLI repository
+AZ_REPO=$(lsb_release -cs)
+echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO main" | \
+    sudo tee /etc/apt/sources.list.d/azure-cli.list
+
+# Update package list and install Azure CLI
+sudo apt update
+sudo apt install -y azure-cli
+Verify the installation:
+
+az --version
+Subtask 1.2: Login to Azure and Create Resource Group
+# Login to Azure (this will open a browser window)
+az login
+
+# Set your subscription (replace with your subscription ID)
+az account set --subscription "your-subscription-id"
+
+# Create a resource group for monitoring resources
+az group create --name "monitoring-lab-rg" --location "eastus"
+Subtask 1.3: Create Log Analytics Workspace
+# Create Log Analytics workspace
+az monitor log-analytics workspace create \
+    --resource-group "monitoring-lab-rg" \
+    --workspace-name "monitoring-lab-workspace" \
+    --location "eastus" \
+    --sku "PerGB2018"
+
+# Get workspace ID and key for later use
+WORKSPACE_ID=$(az monitor log-analytics workspace show \
+    --resource-group "monitoring-lab-rg" \
+    --workspace-name "monitoring-lab-workspace" \
+    --query "customerId" -o tsv)
+
+WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
+    --resource-group "monitoring-lab-rg" \
+    --workspace-name "monitoring-lab-workspace" \
+    --query "primarySharedKey" -o tsv)
+
+echo "Workspace ID: $WORKSPACE_ID"
+echo "Workspace Key: $WORKSPACE_KEY"
+Subtask 1.4: Install and Configure Log Analytics Agent
+# Download and install the Log Analytics agent
+wget https://raw.githubusercontent.com/Microsoft/OMS-Agent-for-Linux/master/installer/scripts/onboard_agent.sh
+
+# Make the script executable
+chmod +x onboard_agent.sh
+
+# Install the agent (replace with your actual workspace ID and key)
+sudo ./onboard_agent.sh -w $WORKSPACE_ID -s $WORKSPACE_KEY
+Subtask 1.5: Configure System Monitoring
+Create a configuration file for custom log collection:
+
+# Create custom log configuration
+sudo tee /etc/opt/microsoft/omsagent/conf/omsagent.d/custom_logs.conf > /dev/null <<EOF
+<source>
+  type tail
+  path /var/log/syslog
+  pos_file /var/opt/microsoft/omsagent/state/syslog.pos
+  tag oms.api.syslog
+  format syslog
+</source>
+
+<source>
+  type tail
+  path /var/log/auth.log
+  pos_file /var/opt/microsoft/omsagent/state/auth.pos
+  tag oms.api.auth
+  format syslog
+</source>
+EOF
+
+# Restart the OMS agent
+sudo systemctl restart omsagent
+Task 2: Visualize Data using Open-Source Grafana Integrated with Azure Metrics
+Subtask 2.1: Install Grafana using Docker
+# Create a directory for Grafana data
+mkdir -p ~/grafana-data
+
+# Create docker-compose.yml for Grafana
+tee ~/docker-compose.yml > /dev/null <<EOF
+version: '3.8'
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_INSTALL_PLUGINS=grafana-azure-monitor-datasource
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    user: "472"
+    restart: unless-stopped
+EOF
+
+# Start Grafana container
+docker-compose up -d
+
+# Wait for Grafana to start
+sleep 30
+
+# Check if Grafana is running
+docker ps
+Subtask 2.2: Configure Azure Monitor Data Source in Grafana
+First, create an Azure service principal for Grafana authentication:
+
+# Create service principal
+SP_OUTPUT=$(az ad sp create-for-rbac --name "grafana-monitoring" --role "Monitoring Reader")
+
+# Extract values
+CLIENT_ID=$(echo $SP_OUTPUT | jq -r '.appId')
+CLIENT_SECRET=$(echo $SP_OUTPUT | jq -r '.password')
+TENANT_ID=$(echo $SP_OUTPUT | jq -r '.tenant')
+SUBSCRIPTION_ID=$(az account show --query 'id' -o tsv)
+
+echo "Client ID: $CLIENT_ID"
+echo "Client Secret: $CLIENT_SECRET"
+echo "Tenant ID: $TENANT_ID"
+echo "Subscription ID: $SUBSCRIPTION_ID"
+Subtask 2.3: Access Grafana and Configure Data Sources
+Open your web browser and navigate to http://localhost:3000
+Login with username: admin and password: admin123
+Go to Configuration > Data Sources
+Click Add data source
+Select Azure Monitor
+Configure the Azure Monitor data source with the following settings:
+
+{
+  "authentication": {
+    "type": "clientsecret",
+    "clientId": "your-client-id",
+    "clientSecret": "your-client-secret",
+    "tenantId": "your-tenant-id"
+  },
+  "subscriptionId": "your-subscription-id"
+}
+Subtask 2.4: Create System Monitoring Dashboard
+Create a comprehensive dashboard by following these steps:
+
+Click the + icon and select Dashboard
+Click Add new panel
+Configure the following panels:
+Panel 1: CPU Usage
+
+{
+  "title": "CPU Usage",
+  "type": "stat",
+  "targets": [
+    {
+      "datasource": "Azure Monitor",
+      "metricDefinition": "Microsoft.Compute/virtualMachines",
+      "metricName": "Percentage CPU",
+      "aggregation": "Average"
+    }
+  ]
+}
+Panel 2: Memory Usage
+
+{
+  "title": "Memory Usage",
+  "type": "timeseries",
+  "targets": [
+    {
+      "datasource": "Azure Monitor",
+      "metricDefinition": "Microsoft.Compute/virtualMachines",
+      "metricName": "Available Memory Bytes",
+      "aggregation": "Average"
+    }
+  ]
+}
+Subtask 2.5: Create Local System Monitoring with Prometheus
+Since we're working locally, let's also set up Prometheus for local system monitoring:
+
+# Create Prometheus configuration
+mkdir -p ~/prometheus
+
+tee ~/prometheus/prometheus.yml > /dev/null <<EOF
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+  
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+EOF
+
+# Update docker-compose.yml to include Prometheus and Node Exporter
+tee ~/docker-compose.yml > /dev/null <<EOF
+version: '3.8'
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    user: "472"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+EOF
+
+# Restart services
+docker-compose down
+docker-compose up -d
+Subtask 2.6: Configure Prometheus Data Source in Grafana
+In Grafana, go to Configuration > Data Sources
+Click Add data source
+Select Prometheus
+Set URL to: http://prometheus:9090
+Click Save & Test
+Subtask 2.7: Import Node Exporter Dashboard
+Go to Dashboards > Import
+Enter dashboard ID: 1860 (Node Exporter Full dashboard)
+Click Load
+Select Prometheus as the data source
+Click Import
+Subtask 2.8: Create Custom Alerts
+Create an alert for high CPU usage:
+
+Go to Alerting > Alert Rules
+Click New Rule
+Configure the alert:
+Alert Rule:
+  Name: High CPU Usage
+  Query: 
+    - A: avg(100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100))
+  Condition: IS ABOVE 80
+  Evaluation: Every 1m for 5m
+Add notification channels:
+Go to Alerting > Notification Channels
+Add email or webhook notifications
+Subtask 2.9: Generate Test Load for Monitoring
+Create a simple script to generate system load for testing:
+
+# Create load testing script
+tee ~/load_test.sh > /dev/null <<'EOF'
+#!/bin/bash
+
+echo "Starting CPU load test..."
+# Generate CPU load
+for i in {1..4}; do
+    yes > /dev/null &
+done
+
+echo "Load test running for 2 minutes..."
+sleep 120
+
+echo "Stopping load test..."
+killall yes
+
+echo "Load test completed."
+EOF
+
+chmod +x ~/load_test.sh
+
+# Run the load test
+./load_test.sh
+Verification and Testing
+Test Your Monitoring Setup
+Verify Grafana Access: Navigate to http://localhost:3000 and ensure all dashboards are loading
+Check Prometheus Metrics: Visit http://localhost:9090 and verify targets are up
+Monitor System Metrics: Watch the Node Exporter dashboard during the load test
+Verify Azure Integration: Check that Azure Monitor data is flowing (if configured)
+Troubleshooting Common Issues
+Issue 1: Grafana not accessible
+
+# Check container status
+docker ps
+
+# Check logs
+docker logs grafana
+Issue 2: Prometheus targets down
+
+# Verify network connectivity
+docker network ls
+docker network inspect <network_name>
+Issue 3: No metrics data
+
+# Check node-exporter metrics
+curl http://localhost:9100/metrics
+Conclusion
+In this lab, you have successfully:
+
+• Set up comprehensive monitoring infrastructure using both Azure Monitor and local Prometheus/Grafana stack • Configured data collection from system metrics and logs using industry-standard tools • Created interactive dashboards in Grafana to visualize system performance and health metrics • Implemented alerting mechanisms to proactively monitor system conditions • Integrated cloud and local monitoring solutions for a hybrid monitoring approach
+
+Why This Matters: Modern applications require robust monitoring and observability to ensure reliability, performance, and security. The skills you've learned in this lab are essential for:
+
+DevOps Engineers who need to monitor application and infrastructure health
+System Administrators responsible for maintaining system uptime and performance
+Site Reliability Engineers who implement monitoring as part of reliability practices
+Cloud Engineers working with hybrid cloud environments
+The combination of Azure Monitor's cloud-native capabilities with Grafana's powerful visualization features provides a comprehensive monitoring solution that scales from local development to enterprise production environments. These tools form the foundation of modern observability practices, enabling teams to detect, diagnose, and resolve issues before they impact users.
+
+Next Steps: Consider exploring advanced features like custom metrics, distributed tracing, and automated remediation to further enhance your monitoring capabilities.
