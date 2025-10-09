@@ -1,0 +1,651 @@
+Lab 20: Cost Management and Performance Optimization in Azure
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand Azure cost management principles and tools • Analyze cloud spending patterns using open-source monitoring tools • Implement cost optimization strategies for virtual machines • Monitor and measure performance metrics using free tools • Create cost forecasting models using basic calculations • Apply best practices for resource optimization in cloud environments
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of cloud computing concepts • Familiarity with Linux command line interface • Basic knowledge of system monitoring concepts • Understanding of virtual machine fundamentals • Access to a web browser for Azure portal simulation
+
+Note: Al Nafi provides ready-to-use Linux-based cloud machines. Simply click "Start Lab" to begin - no need to build your own VM.
+
+Lab Overview
+This lab focuses on cost management and performance optimization using open-source tools that simulate Azure cost management scenarios. We'll use local tools to understand cost analysis, performance monitoring, and optimization strategies that apply to cloud environments.
+
+Task 1: Simulate Azure Cost Analysis and Forecasting
+Subtask 1.1: Set Up Cost Monitoring Environment
+First, let's create a simulated environment to track and analyze costs.
+
+Create project directory structure:
+mkdir -p ~/azure-cost-lab/{scripts,data,reports}
+cd ~/azure-cost-lab
+Install required tools:
+# Update package manager
+sudo apt update
+
+# Install Python and required packages
+sudo apt install -y python3 python3-pip curl jq
+
+# Install Python libraries for data analysis
+pip3 install pandas matplotlib numpy
+Create sample cost data file:
+cat > data/azure_costs.csv << 'EOF'
+Date,Service,ResourceGroup,Cost,Region,ResourceType
+2024-01-01,Virtual Machines,Production,125.50,East US,Standard_B2s
+2024-01-01,Storage,Production,45.20,East US,Standard_LRS
+2024-01-01,Networking,Production,23.10,East US,VNet
+2024-01-02,Virtual Machines,Development,89.30,West US,Standard_B1s
+2024-01-02,Storage,Development,12.40,West US,Standard_LRS
+2024-01-03,Virtual Machines,Production,135.75,East US,Standard_B2s
+2024-01-03,Database,Production,78.90,East US,Basic
+2024-01-04,Virtual Machines,Testing,67.20,Central US,Spot_B2s
+2024-01-04,Storage,Testing,8.50,Central US,Standard_LRS
+2024-01-05,Virtual Machines,Production,142.30,East US,Standard_B2s
+EOF
+Subtask 1.2: Create Cost Analysis Script
+Create Python script for cost analysis:
+cat > scripts/cost_analyzer.py << 'EOF'
+#!/usr/bin/env python3
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from datetime import datetime, timedelta
+
+class AzureCostAnalyzer:
+    def __init__(self, data_file):
+        self.df = pd.read_csv(data_file)
+        self.df['Date'] = pd.to_datetime(self.df['Date'])
+        
+    def analyze_costs_by_service(self):
+        """Analyze costs grouped by service type"""
+        service_costs = self.df.groupby('Service')['Cost'].sum().sort_values(ascending=False)
+        print("=== Cost Analysis by Service ===")
+        for service, cost in service_costs.items():
+            print(f"{service}: ${cost:.2f}")
+        return service_costs
+    
+    def analyze_costs_by_resource_group(self):
+        """Analyze costs grouped by resource group"""
+        rg_costs = self.df.groupby('ResourceGroup')['Cost'].sum().sort_values(ascending=False)
+        print("\n=== Cost Analysis by Resource Group ===")
+        for rg, cost in rg_costs.items():
+            print(f"{rg}: ${cost:.2f}")
+        return rg_costs
+    
+    def daily_cost_trend(self):
+        """Show daily cost trends"""
+        daily_costs = self.df.groupby('Date')['Cost'].sum()
+        print("\n=== Daily Cost Trends ===")
+        for date, cost in daily_costs.items():
+            print(f"{date.strftime('%Y-%m-%d')}: ${cost:.2f}")
+        return daily_costs
+    
+    def forecast_monthly_cost(self):
+        """Simple linear forecast for monthly costs"""
+        daily_costs = self.df.groupby('Date')['Cost'].sum()
+        avg_daily_cost = daily_costs.mean()
+        monthly_forecast = avg_daily_cost * 30
+        print(f"\n=== Monthly Cost Forecast ===")
+        print(f"Average daily cost: ${avg_daily_cost:.2f}")
+        print(f"Projected monthly cost: ${monthly_forecast:.2f}")
+        return monthly_forecast
+    
+    def identify_cost_optimization_opportunities(self):
+        """Identify potential cost savings"""
+        print("\n=== Cost Optimization Opportunities ===")
+        
+        # Find expensive VM instances
+        vm_costs = self.df[self.df['Service'] == 'Virtual Machines']
+        expensive_vms = vm_costs[vm_costs['Cost'] > vm_costs['Cost'].mean()]
+        
+        if not expensive_vms.empty:
+            print("High-cost VM instances (candidates for B-series or Spot):")
+            for _, row in expensive_vms.iterrows():
+                print(f"  - {row['ResourceType']} in {row['ResourceGroup']}: ${row['Cost']:.2f}")
+                if 'Standard_' in row['ResourceType']:
+                    print(f"    Recommendation: Consider B-series equivalent")
+        
+        # Calculate potential savings with Spot VMs
+        standard_vm_costs = vm_costs[vm_costs['ResourceType'].str.contains('Standard_')]
+        if not standard_vm_costs.empty:
+            total_standard_cost = standard_vm_costs['Cost'].sum()
+            potential_spot_savings = total_standard_cost * 0.7  # 70% savings typical
+            print(f"\nPotential Spot VM savings: ${potential_spot_savings:.2f} (70% of ${total_standard_cost:.2f})")
+
+def main():
+    analyzer = AzureCostAnalyzer('data/azure_costs.csv')
+    
+    analyzer.analyze_costs_by_service()
+    analyzer.analyze_costs_by_resource_group()
+    analyzer.daily_cost_trend()
+    analyzer.forecast_monthly_cost()
+    analyzer.identify_cost_optimization_opportunities()
+
+if __name__ == "__main__":
+    main()
+EOF
+Make the script executable and run it:
+chmod +x scripts/cost_analyzer.py
+python3 scripts/cost_analyzer.py
+Subtask 1.3: Generate Cost Reports
+Create a report generation script:
+cat > scripts/generate_report.py << 'EOF'
+#!/usr/bin/env python3
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+def generate_cost_report():
+    # Read the data
+    df = pd.read_csv('data/azure_costs.csv')
+    df['Date'] = pd.to_datetime(df['Date'])
+    
+    # Create visualizations
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Service costs pie chart
+    service_costs = df.groupby('Service')['Cost'].sum()
+    ax1.pie(service_costs.values, labels=service_costs.index, autopct='%1.1f%%')
+    ax1.set_title('Cost Distribution by Service')
+    
+    # Daily cost trend
+    daily_costs = df.groupby('Date')['Cost'].sum()
+    ax2.plot(daily_costs.index, daily_costs.values, marker='o')
+    ax2.set_title('Daily Cost Trend')
+    ax2.set_xlabel('Date')
+    ax2.set_ylabel('Cost ($)')
+    ax2.tick_params(axis='x', rotation=45)
+    
+    # Resource group comparison
+    rg_costs = df.groupby('ResourceGroup')['Cost'].sum()
+    ax3.bar(rg_costs.index, rg_costs.values)
+    ax3.set_title('Costs by Resource Group')
+    ax3.set_xlabel('Resource Group')
+    ax3.set_ylabel('Cost ($)')
+    
+    # VM type comparison
+    vm_data = df[df['Service'] == 'Virtual Machines']
+    vm_costs = vm_data.groupby('ResourceType')['Cost'].sum()
+    ax4.bar(vm_costs.index, vm_costs.values)
+    ax4.set_title('VM Costs by Type')
+    ax4.set_xlabel('VM Type')
+    ax4.set_ylabel('Cost ($)')
+    ax4.tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    plt.savefig('reports/cost_analysis_report.png', dpi=300, bbox_inches='tight')
+    print("Cost analysis report saved to reports/cost_analysis_report.png")
+    
+    # Generate text report
+    with open('reports/cost_summary.txt', 'w') as f:
+        f.write("AZURE COST ANALYSIS REPORT\n")
+        f.write("=" * 30 + "\n\n")
+        f.write(f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        f.write("TOTAL COSTS BY SERVICE:\n")
+        for service, cost in service_costs.items():
+            f.write(f"  {service}: ${cost:.2f}\n")
+        
+        f.write(f"\nTOTAL COST: ${df['Cost'].sum():.2f}\n")
+        f.write(f"AVERAGE DAILY COST: ${daily_costs.mean():.2f}\n")
+        f.write(f"PROJECTED MONTHLY COST: ${daily_costs.mean() * 30:.2f}\n")
+    
+    print("Text summary saved to reports/cost_summary.txt")
+
+if __name__ == "__main__":
+    generate_cost_report()
+EOF
+Run the report generator:
+python3 scripts/generate_report.py
+View the generated reports:
+cat reports/cost_summary.txt
+ls -la reports/
+Task 2: Simulate B-series and Spot VM Cost Optimization
+Subtask 2.1: Create VM Performance Simulation
+Create a VM performance monitoring script:
+cat > scripts/vm_performance_monitor.py << 'EOF'
+#!/usr/bin/env python3
+import time
+import random
+import json
+from datetime import datetime, timedelta
+
+class VMPerformanceSimulator:
+    def __init__(self):
+        self.vm_types = {
+            'Standard_B1s': {'cpu_cores': 1, 'ram_gb': 1, 'cost_per_hour': 0.0104},
+            'Standard_B2s': {'cpu_cores': 2, 'ram_gb': 4, 'cost_per_hour': 0.0416},
+            'Standard_B4ms': {'cpu_cores': 4, 'ram_gb': 16, 'cost_per_hour': 0.1664},
+            'Spot_B1s': {'cpu_cores': 1, 'ram_gb': 1, 'cost_per_hour': 0.0031},
+            'Spot_B2s': {'cpu_cores': 2, 'ram_gb': 4, 'cost_per_hour': 0.0125},
+            'Spot_B4ms': {'cpu_cores': 4, 'ram_gb': 16, 'cost_per_hour': 0.0499}
+        }
+    
+    def simulate_cpu_usage(self, vm_type, duration_hours=1):
+        """Simulate CPU usage patterns for different VM types"""
+        vm_config = self.vm_types[vm_type]
+        cpu_cores = vm_config['cpu_cores']
+        
+        # B-series VMs have burstable performance
+        if vm_type.startswith('Standard_B'):
+            base_cpu = random.uniform(10, 30)  # Base CPU usage
+            burst_periods = random.randint(1, 3)  # Number of burst periods
+        else:  # Spot VMs
+            base_cpu = random.uniform(15, 40)  # Slightly higher base usage
+            burst_periods = random.randint(0, 2)  # Fewer burst periods
+        
+        usage_data = []
+        for minute in range(int(duration_hours * 60)):
+            if minute % 20 == 0 and burst_periods > 0:  # Burst every 20 minutes
+                cpu_usage = min(random.uniform(70, 95), 100)
+                burst_periods -= 1
+            else:
+                cpu_usage = base_cpu + random.uniform(-5, 15)
+                cpu_usage = max(0, min(cpu_usage, 100))
+            
+            usage_data.append({
+                'timestamp': datetime.now() + timedelta(minutes=minute),
+                'cpu_usage': round(cpu_usage, 2),
+                'vm_type': vm_type,
+                'cost_per_minute': vm_config['cost_per_hour'] / 60
+            })
+        
+        return usage_data
+    
+    def calculate_performance_cost_ratio(self, usage_data):
+        """Calculate performance to cost ratio"""
+        total_cpu_time = sum(data['cpu_usage'] for data in usage_data)
+        total_cost = sum(data['cost_per_minute'] for data in usage_data)
+        
+        if total_cost > 0:
+            performance_cost_ratio = total_cpu_time / total_cost
+        else:
+            performance_cost_ratio = 0
+        
+        return {
+            'total_cpu_time': total_cpu_time,
+            'total_cost': total_cost,
+            'performance_cost_ratio': performance_cost_ratio,
+            'avg_cpu_usage': total_cpu_time / len(usage_data)
+        }
+    
+    def compare_vm_types(self, duration_hours=1):
+        """Compare different VM types"""
+        results = {}
+        
+        for vm_type in self.vm_types:
+            print(f"Simulating {vm_type}...")
+            usage_data = self.simulate_cpu_usage(vm_type, duration_hours)
+            performance_metrics = self.calculate_performance_cost_ratio(usage_data)
+            
+            results[vm_type] = {
+                'config': self.vm_types[vm_type],
+                'performance': performance_metrics,
+                'usage_data': usage_data[-10:]  # Keep last 10 data points
+            }
+        
+        return results
+    
+    def generate_optimization_recommendations(self, results):
+        """Generate cost optimization recommendations"""
+        print("\n=== VM OPTIMIZATION RECOMMENDATIONS ===")
+        
+        # Find best performance/cost ratios
+        ratios = {vm: data['performance']['performance_cost_ratio'] 
+                 for vm, data in results.items()}
+        
+        best_ratio_vm = max(ratios, key=ratios.get)
+        print(f"Best Performance/Cost Ratio: {best_ratio_vm}")
+        print(f"Ratio: {ratios[best_ratio_vm]:.2f}")
+        
+        # Compare Standard vs Spot
+        standard_vms = {k: v for k, v in results.items() if k.startswith('Standard_')}
+        spot_vms = {k: v for k, v in results.items() if k.startswith('Spot_')}
+        
+        print("\n=== COST COMPARISON ===")
+        for std_vm, std_data in standard_vms.items():
+            spot_equivalent = std_vm.replace('Standard_', 'Spot_')
+            if spot_equivalent in spot_vms:
+                std_cost = std_data['performance']['total_cost']
+                spot_cost = spot_vms[spot_equivalent]['performance']['total_cost']
+                savings = ((std_cost - spot_cost) / std_cost) * 100
+                print(f"{std_vm} vs {spot_equivalent}:")
+                print(f"  Standard Cost: ${std_cost:.4f}")
+                print(f"  Spot Cost: ${spot_cost:.4f}")
+                print(f"  Savings: {savings:.1f}%")
+
+def main():
+    simulator = VMPerformanceSimulator()
+    
+    print("Starting VM Performance Simulation...")
+    print("This simulates 1 hour of VM usage across different instance types")
+    
+    results = simulator.compare_vm_types(duration_hours=1)
+    
+    # Display results
+    print("\n=== SIMULATION RESULTS ===")
+    for vm_type, data in results.items():
+        perf = data['performance']
+        config = data['config']
+        print(f"\n{vm_type}:")
+        print(f"  Configuration: {config['cpu_cores']} cores, {config['ram_gb']}GB RAM")
+        print(f"  Cost per hour: ${config['cost_per_hour']:.4f}")
+        print(f"  Average CPU usage: {perf['avg_cpu_usage']:.2f}%")
+        print(f"  Total cost (1 hour): ${perf['total_cost']:.4f}")
+        print(f"  Performance/Cost ratio: {perf['performance_cost_ratio']:.2f}")
+    
+    simulator.generate_optimization_recommendations(results)
+    
+    # Save results to file
+    with open('reports/vm_performance_analysis.json', 'w') as f:
+        # Convert datetime objects to strings for JSON serialization
+        json_results = {}
+        for vm_type, data in results.items():
+            json_results[vm_type] = {
+                'config': data['config'],
+                'performance': data['performance']
+            }
+        json.dump(json_results, f, indent=2)
+    
+    print("\nDetailed results saved to reports/vm_performance_analysis.json")
+
+if __name__ == "__main__":
+    main()
+EOF
+Run the VM performance simulation:
+python3 scripts/vm_performance_monitor.py
+Subtask 2.2: Create Cost Optimization Calculator
+Create a cost optimization calculator:
+cat > scripts/cost_optimizer.py << 'EOF'
+#!/usr/bin/env python3
+import json
+
+class CostOptimizer:
+    def __init__(self):
+        self.vm_pricing = {
+            'Standard_B1s': 0.0104,
+            'Standard_B2s': 0.0416,
+            'Standard_B4ms': 0.1664,
+            'Spot_B1s': 0.0031,
+            'Spot_B2s': 0.0125,
+            'Spot_B4ms': 0.0499
+        }
+    
+    def calculate_monthly_costs(self, vm_type, hours_per_day=8, days_per_month=22):
+        """Calculate monthly costs for a VM type"""
+        hourly_rate = self.vm_pricing[vm_type]
+        monthly_hours = hours_per_day * days_per_month
+        monthly_cost = hourly_rate * monthly_hours
+        return monthly_cost
+    
+    def compare_standard_vs_spot(self, vm_size='B2s', hours_per_day=8, days_per_month=22):
+        """Compare Standard vs Spot pricing"""
+        standard_vm = f'Standard_{vm_size}'
+        spot_vm = f'Spot_{vm_size}'
+        
+        standard_cost = self.calculate_monthly_costs(standard_vm, hours_per_day, days_per_month)
+        spot_cost = self.calculate_monthly_costs(spot_vm, hours_per_day, days_per_month)
+        
+        savings = standard_cost - spot_cost
+        savings_percentage = (savings / standard_cost) * 100
+        
+        return {
+            'standard_cost': standard_cost,
+            'spot_cost': spot_cost,
+            'savings': savings,
+            'savings_percentage': savings_percentage
+        }
+    
+    def right_size_recommendation(self, current_vm, avg_cpu_usage, avg_memory_usage):
+        """Recommend right-sizing based on usage patterns"""
+        recommendations = []
+        
+        # Define usage thresholds
+        if avg_cpu_usage < 20 and avg_memory_usage < 30:
+            recommendations.append("Consider downsizing to a smaller VM")
+            if current_vm == 'Standard_B4ms':
+                recommendations.append("Recommended: Standard_B2s or Spot_B2s")
+            elif current_vm == 'Standard_B2s':
+                recommendations.append("Recommended: Standard_B1s or Spot_B1s")
+        
+        elif avg_cpu_usage > 80 or avg_memory_usage > 85:
+            recommendations.append("Consider upgrading to a larger VM")
+            if current_vm == 'Standard_B1s':
+                recommendations.append("Recommended: Standard_B2s")
+            elif current_vm == 'Standard_B2s':
+                recommendations.append("Recommended: Standard_B4ms")
+        
+        else:
+            recommendations.append("Current VM size appears appropriate")
+            recommendations.append("Consider Spot VM for cost savings if workload allows interruptions")
+        
+        return recommendations
+    
+    def generate_optimization_report(self):
+        """Generate comprehensive optimization report"""
+        print("=== AZURE VM COST OPTIMIZATION REPORT ===\n")
+        
+        # Monthly cost comparison for different scenarios
+        scenarios = [
+            {'name': 'Development Environment', 'hours': 8, 'days': 22},
+            {'name': 'Production Environment', 'hours': 24, 'days': 30},
+            {'name': 'Testing Environment', 'hours': 4, 'days': 20}
+        ]
+        
+        for scenario in scenarios:
+            print(f"--- {scenario['name']} ---")
+            print(f"Usage: {scenario['hours']} hours/day, {scenario['days']} days/month\n")
+            
+            for vm_size in ['B1s', 'B2s', 'B4ms']:
+                comparison = self.compare_standard_vs_spot(
+                    vm_size, scenario['hours'], scenario['days']
+                )
+                
+                print(f"{vm_size} Comparison:")
+                print(f"  Standard VM: ${comparison['standard_cost']:.2f}/month")
+                print(f"  Spot VM: ${comparison['spot_cost']:.2f}/month")
+                print(f"  Monthly Savings: ${comparison['savings']:.2f} ({comparison['savings_percentage']:.1f}%)")
+                print()
+            
+            print("-" * 50 + "\n")
+        
+        # Right-sizing examples
+        print("=== RIGHT-SIZING RECOMMENDATIONS ===\n")
+        
+        usage_examples = [
+            {'vm': 'Standard_B4ms', 'cpu': 15, 'memory': 25, 'workload': 'Over-provisioned web server'},
+            {'vm': 'Standard_B1s', 'cpu': 85, 'memory': 90, 'workload': 'Under-provisioned database'},
+            {'vm': 'Standard_B2s', 'cpu': 45, 'memory': 60, 'workload': 'Well-sized application server'}
+        ]
+        
+        for example in usage_examples:
+            print(f"Workload: {example['workload']}")
+            print(f"Current VM: {example['vm']}")
+            print(f"Usage: {example['cpu']}% CPU, {example['memory']}% Memory")
+            
+            recommendations = self.right_size_recommendation(
+                example['vm'], example['cpu'], example['memory']
+            )
+            
+            print("Recommendations:")
+            for rec in recommendations:
+                print(f"  • {rec}")
+            print()
+        
+        # Best practices summary
+        print("=== COST OPTIMIZATION BEST PRACTICES ===\n")
+        best_practices = [
+            "Use Spot VMs for fault-tolerant workloads (up to 90% savings)",
+            "Implement auto-shutdown for development/testing environments",
+            "Right-size VMs based on actual usage patterns",
+            "Use B-series VMs for variable workloads with burstable performance",
+            "Monitor and analyze costs regularly using Azure Cost Management",
+            "Consider Reserved Instances for predictable, long-term workloads",
+            "Use Azure Advisor recommendations for optimization opportunities"
+        ]
+        
+        for i, practice in enumerate(best_practices, 1):
+            print(f"{i}. {practice}")
+
+def main():
+    optimizer = CostOptimizer()
+    optimizer.generate_optimization_report()
+    
+    # Save pricing data for reference
+    with open('reports/vm_pricing_reference.json', 'w') as f:
+        json.dump(optimizer.vm_pricing, f, indent=2)
+    
+    print(f"\nVM pricing reference saved to reports/vm_pricing_reference.json")
+
+if __name__ == "__main__":
+    main()
+EOF
+Run the cost optimization calculator:
+python3 scripts/cost_optimizer.py
+Subtask 2.3: Create Performance Monitoring Dashboard
+Create a simple monitoring dashboard script:
+cat > scripts/monitoring_dashboard.py << 'EOF'
+#!/usr/bin/env python3
+import time
+import random
+import os
+from datetime import datetime
+
+class MonitoringDashboard:
+    def __init__(self):
+        self.vm_instances = {
+            'web-server-01': {'type': 'Standard_B2s', 'status': 'running'},
+            'db-server-01': {'type': 'Standard_B4ms', 'status': 'running'},
+            'test-vm-01': {'type': 'Spot_B1s', 'status': 'running'},
+            'dev-vm-01': {'type': 'Spot_B2s', 'status': 'stopped'}
+        }
+    
+    def get_system_metrics(self):
+        """Simulate getting system metrics"""
+        return {
+            'cpu_usage': random.uniform(10, 90),
+            'memory_usage': random.uniform(20, 80),
+            'disk_usage': random.uniform(30, 70),
+            'network_in': random.uniform(1, 100),
+            'network_out': random.uniform(1, 50)
+        }
+    
+    def calculate_current_costs(self):
+        """Calculate current hourly costs"""
+        pricing = {
+            'Standard_B1s': 0.0104,
+            'Standard_B2s': 0.0416,
+            'Standard_B4ms': 0.1664,
+            'Spot_B1s': 0.0031,
+            'Spot_B2s': 0.0125,
+            'Spot_B4ms': 0.0499
+        }
+        
+        total_hourly_cost = 0
+        running_vms = 0
+        
+        for vm_name, vm_info in self.vm_instances.items():
+            if vm_info['status'] == 'running':
+                total_hourly_cost += pricing.get(vm_info['type'], 0)
+                running_vms += 1
+        
+        return {
+            'hourly_cost': total_hourly_cost,
+            'daily_cost': total_hourly_cost * 24,
+            'monthly_cost': total_hourly_cost * 24 * 30,
+            'running_vms': running_vms
+        }
+    
+    def display_dashboard(self):
+        """Display the monitoring dashboard"""
+        os.system('clear' if os.name == 'posix' else 'cls')
+        
+        print("=" * 60)
+        print("    AZURE VM MONITORING DASHBOARD")
+        print("=" * 60)
+        print(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print()
+        
+        # VM Status Section
+        print("VM INSTANCES STATUS:")
+        print("-" * 40)
+        for vm_name, vm_info in self.vm_instances.items():
+            status_symbol = "🟢" if vm_info['status'] == 'running' else "🔴"
+            print(f"{status_symbol} {vm_name:<15} {vm_info['type']:<15} {vm_info['status'].upper()}")
+        
+        print()
+        
+        # Metrics Section
+        print("PERFORMANCE METRICS:")
+        print("-" * 40)
+        for vm_name, vm_info in self.vm_instances.items():
+            if vm_info['status'] == 'running':
+                metrics = self.get_system_metrics()
+                print(f"{vm_name}:")
+                print(f"  CPU: {metrics['cpu_usage']:.1f}%  Memory: {metrics['memory_usage']:.1f}%  Disk: {metrics['disk_usage']:.1f}%")
+                print(f"  Network In: {metrics['network_in']:.1f} MB/s  Out: {metrics['network_out']:.1f} MB/s")
+                print()
+        
+        # Cost Section
+        costs = self.calculate_current_costs()
+        print("COST ANALYSIS:")
+        print("-" * 40)
+        print(f"Running VMs: {costs['running_vms']}")
+        print(f"Current Hourly Cost: ${costs['hourly_cost']:.4f}")
+        print(f"Projected Daily Cost: ${costs['daily_cost']:.2f}")
+        print(f"Projected Monthly Cost: ${costs['monthly_cost']:.2f}")
+        
+        print()
+        
+        # Optimization Alerts
+        print("OPTIMIZATION ALERTS:")
+        print("-" * 40)
+        if costs['monthly_cost'] > 100:
+            print("⚠️  High monthly cost detected - Consider optimization")
+        
+        running_standard_vms = sum(1 for vm in self.vm_instances.values() 
+                                 if vm['status'] == 'running' and vm['type'].startswith('Standard_'))
+        if running_standard_vms > 0:
+            print(f"💡 {running_standard_vms} Standard VMs running - Consider Spot VMs for cost savings")
+        
+        stopped_vms = sum(1 for vm in self.vm_instances.values() if vm['status'] == 'stopped')
+        if stopped_vms > 0:
+            print(f"✅ {stopped_vms} VMs stopped - Good cost management!")
+        
+        print("\nPress Ctrl+C to exit monitoring...")
+    
+    def run_monitoring(self, duration_minutes=5):
+        """Run the monitoring dashboard for specified duration"""
+        end_time = time.time() + (duration_minutes * 60)
+        
+        try:
+            while time.time() < end_time:
+                self.display_dashboard()
+                time.sleep(10)  # Update every 10 seconds
+                
+                # Simulate some changes
+                if random.random() < 0.1:  # 10% chance of status change
+                    vm_name = random.choice(list(self.vm_instances.keys()))
+                    current_status = self.vm_instances[vm_name]['status']
+                    new_status = 'stopped' if current_status == 'running' else 'running'
+                    self.vm_instances[vm_name]['status'] = new_status
+        
+        except KeyboardInterrupt:
+            print("\nMonitoring stopped by user.")
+        
+        print(f"\nMonitoring completed. Final cost summary:")
+        final_costs = self.calculate_current_costs()
+        print(f"Final hourly cost: ${final_costs['hourly_cost']:.4f}")
+        print(f"Projected monthly cost: ${final_costs['monthly_cost']:.2f}")
+
+def main():
+    dashboard = MonitoringDashboard()
+    
+    print("Starting Azure VM Monitoring Dashboard...")
+    print("This will run for 2 minutes with updates every 10 seconds")
+    print("You can press
+Lab Terminal
+
+Instructions
