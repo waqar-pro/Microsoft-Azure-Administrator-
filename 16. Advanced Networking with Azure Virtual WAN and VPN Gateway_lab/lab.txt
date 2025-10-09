@@ -1,0 +1,380 @@
+Lab 6: Advanced Networking with Azure Virtual WAN and VPN Gateway
+Objectives
+By the end of this lab, students will be able to:
+
+• Understand the concepts of Virtual WAN and VPN Gateway technologies • Set up a simulated Virtual WAN environment using open-source tools • Implement VPN connectivity for hybrid networking scenarios • Configure network routing and security policies • Troubleshoot common networking issues in hybrid environments • Demonstrate practical knowledge of software-defined networking principles
+
+Prerequisites
+Before starting this lab, students should have:
+
+• Basic understanding of networking concepts (IP addresses, subnets, routing) • Familiarity with Linux command line interface • Basic knowledge of virtualization concepts • Understanding of VPN fundamentals • Access to a Linux-based system (Al Nafi provides ready-to-use cloud machines)
+
+Lab Environment Setup
+Ready-to-Use Cloud Machines: Al Nafi provides Linux-based cloud machines for this lab. Simply click Start Lab to access your pre-configured environment. No need to build your own VM or install additional software.
+
+Your lab environment includes: • Ubuntu 20.04 LTS with networking tools pre-installed • OpenVPN for VPN gateway simulation • Network simulation tools (Mininet, GNS3) • Monitoring and diagnostic utilities
+
+Task 1: Set up a Virtual WAN for Simplified Wide-Area Networking
+Subtask 1.1: Install and Configure Network Simulation Environment
+First, we'll set up our network simulation environment to represent a Virtual WAN scenario.
+
+Step 1: Update the system and install required packages
+
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y mininet openvswitch-switch openvswitch-common
+sudo apt install -y net-tools bridge-utils iperf3 tcpdump
+Step 2: Verify installation
+
+sudo mn --version
+sudo ovs-vsctl --version
+Subtask 1.2: Create Virtual WAN Topology
+We'll simulate a Virtual WAN with multiple sites connected through a central hub.
+
+Step 1: Create a custom network topology script
+
+nano ~/virtual_wan_topology.py
+Step 2: Add the following Python script to simulate our Virtual WAN:
+
+#!/usr/bin/env python3
+
+from mininet.net import Mininet
+from mininet.node import Controller, OVSKernelSwitch, Host
+from mininet.cli import CLI
+from mininet.log import setLogLevel, info
+from mininet.link import TCLink
+
+def create_virtual_wan():
+    """Create a Virtual WAN topology with hub and spoke model"""
+    
+    net = Mininet(controller=Controller, switch=OVSKernelSwitch, link=TCLink)
+    
+    info('*** Adding controller\n')
+    c0 = net.addController('c0')
+    
+    info('*** Adding Virtual WAN Hub\n')
+    hub_switch = net.addSwitch('s1', cls=OVSKernelSwitch)
+    
+    info('*** Adding Branch Office Switches\n')
+    branch1_switch = net.addSwitch('s2', cls=OVSKernelSwitch)
+    branch2_switch = net.addSwitch('s3', cls=OVSKernelSwitch)
+    branch3_switch = net.addSwitch('s4', cls=OVSKernelSwitch)
+    
+    info('*** Adding hosts to simulate branch offices\n')
+    # Hub datacenter hosts
+    hub_host1 = net.addHost('h1', ip='10.0.1.10/24')
+    hub_host2 = net.addHost('h2', ip='10.0.1.11/24')
+    
+    # Branch office hosts
+    branch1_host = net.addHost('h3', ip='10.0.2.10/24')
+    branch2_host = net.addHost('h4', ip='10.0.3.10/24')
+    branch3_host = net.addHost('h5', ip='10.0.4.10/24')
+    
+    info('*** Creating links\n')
+    # Connect hosts to their respective switches
+    net.addLink(hub_host1, hub_switch)
+    net.addLink(hub_host2, hub_switch)
+    net.addLink(branch1_host, branch1_switch)
+    net.addLink(branch2_host, branch2_switch)
+    net.addLink(branch3_host, branch3_switch)
+    
+    # Connect branch switches to hub (simulating WAN links)
+    net.addLink(hub_switch, branch1_switch, bw=100, delay='20ms')
+    net.addLink(hub_switch, branch2_switch, bw=50, delay='30ms')
+    net.addLink(hub_switch, branch3_switch, bw=75, delay='25ms')
+    
+    info('*** Starting network\n')
+    net.build()
+    c0.start()
+    hub_switch.start([c0])
+    branch1_switch.start([c0])
+    branch2_switch.start([c0])
+    branch3_switch.start([c0])
+    
+    info('*** Configuring routing\n')
+    # Configure routing between subnets
+    hub_host1.cmd('ip route add 10.0.2.0/24 via 10.0.1.1')
+    hub_host1.cmd('ip route add 10.0.3.0/24 via 10.0.1.1')
+    hub_host1.cmd('ip route add 10.0.4.0/24 via 10.0.1.1')
+    
+    info('*** Virtual WAN topology created successfully\n')
+    info('*** Hub: 10.0.1.0/24\n')
+    info('*** Branch 1: 10.0.2.0/24\n')
+    info('*** Branch 2: 10.0.3.0/24\n')
+    info('*** Branch 3: 10.0.4.0/24\n')
+    
+    CLI(net)
+    net.stop()
+
+if __name__ == '__main__':
+    setLogLevel('info')
+    create_virtual_wan()
+Step 3: Make the script executable and run it
+
+chmod +x ~/virtual_wan_topology.py
+sudo python3 ~/virtual_wan_topology.py
+Subtask 1.3: Test Virtual WAN Connectivity
+Once the Mininet CLI starts, test connectivity between different sites.
+
+Step 1: Test connectivity from hub to branches
+
+# In Mininet CLI
+h1 ping -c 3 h3
+h1 ping -c 3 h4
+h1 ping -c 3 h5
+Step 2: Test inter-branch connectivity
+
+# In Mininet CLI
+h3 ping -c 3 h4
+h4 ping -c 3 h5
+Step 3: Monitor network traffic
+
+# In Mininet CLI
+h1 iperf3 -s &
+h3 iperf3 -c 10.0.1.10 -t 10
+Task 2: Implement a VPN Gateway for Hybrid Connectivity
+Subtask 2.1: Install and Configure OpenVPN Server
+We'll set up OpenVPN to simulate a VPN Gateway for hybrid connectivity.
+
+Step 1: Exit Mininet and install OpenVPN
+
+# Exit Mininet CLI first
+exit
+sudo apt install -y openvpn easy-rsa
+Step 2: Set up the Certificate Authority
+
+mkdir ~/openvpn-ca
+cd ~/openvpn-ca
+cp -r /usr/share/easy-rsa/* .
+Step 3: Configure the CA variables
+
+nano vars
+Add the following configuration:
+
+export KEY_COUNTRY="US"
+export KEY_PROVINCE="CA"
+export KEY_CITY="SanFrancisco"
+export KEY_ORG="MyOrganization"
+export KEY_EMAIL="admin@example.com"
+export KEY_OU="MyOrganizationalUnit"
+export KEY_NAME="VPN-Gateway"
+Step 4: Initialize the PKI and build the CA
+
+source vars
+./clean-all
+./build-ca
+Subtask 2.2: Generate Server and Client Certificates
+Step 1: Generate server certificate
+
+./build-key-server vpn-gateway
+Step 2: Generate Diffie-Hellman parameters
+
+./build-dh
+Step 3: Generate client certificate
+
+./build-key client1
+Step 4: Generate TLS authentication key
+
+openvpn --genkey --secret keys/ta.key
+Subtask 2.3: Configure OpenVPN Server
+Step 1: Copy certificates to OpenVPN directory
+
+sudo cp keys/ca.crt keys/vpn-gateway.crt keys/vpn-gateway.key keys/dh2048.pem keys/ta.key /etc/openvpn/
+Step 2: Create server configuration file
+
+sudo nano /etc/openvpn/server.conf
+Add the following configuration:
+
+# OpenVPN Server Configuration for VPN Gateway
+port 1194
+proto udp
+dev tun
+
+# SSL/TLS root certificate (ca), certificate (cert), and private key (key)
+ca ca.crt
+cert vpn-gateway.crt
+key vpn-gateway.key
+dh dh2048.pem
+
+# Network topology
+server 10.8.0.0 255.255.255.0
+ifconfig-pool-persist ipp.txt
+
+# Push routes to client for accessing local networks
+push "route 10.0.1.0 255.255.255.0"
+push "route 10.0.2.0 255.255.255.0"
+push "route 10.0.3.0 255.255.255.0"
+push "route 10.0.4.0 255.255.255.0"
+
+# Allow client-to-client communication
+client-to-client
+
+# Keep alive settings
+keepalive 10 120
+
+# TLS authentication
+tls-auth ta.key 0
+
+# Cipher and authentication
+cipher AES-256-CBC
+auth SHA256
+
+# Compression
+comp-lzo
+
+# User and group
+user nobody
+group nogroup
+
+# Persistence
+persist-key
+persist-tun
+
+# Logging
+status openvpn-status.log
+log-append /var/log/openvpn.log
+verb 3
+Subtask 2.4: Start and Test VPN Gateway
+Step 1: Enable IP forwarding
+
+echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+Step 2: Configure firewall rules
+
+sudo ufw allow 1194/udp
+sudo ufw allow OpenSSH
+sudo ufw --force enable
+Step 3: Start OpenVPN server
+
+sudo systemctl start openvpn@server
+sudo systemctl enable openvpn@server
+Step 4: Check server status
+
+sudo systemctl status openvpn@server
+sudo netstat -tulpn | grep 1194
+Subtask 2.5: Create Client Configuration
+Step 1: Create client configuration file
+
+mkdir ~/vpn-client-config
+cd ~/vpn-client-config
+nano client1.ovpn
+Step 2: Add client configuration
+
+client
+dev tun
+proto udp
+remote localhost 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca ca.crt
+cert client1.crt
+key client1.key
+tls-auth ta.key 1
+cipher AES-256-CBC
+auth SHA256
+comp-lzo
+verb 3
+Step 3: Copy client certificates
+
+cp ~/openvpn-ca/keys/ca.crt .
+cp ~/openvpn-ca/keys/client1.crt .
+cp ~/openvpn-ca/keys/client1.key .
+cp ~/openvpn-ca/keys/ta.key .
+Subtask 2.6: Test VPN Connection
+Step 1: Test VPN connection in a new terminal
+
+# Open new terminal
+cd ~/vpn-client-config
+sudo openvpn --config client1.ovpn
+Step 2: Verify VPN interface
+
+# In another terminal
+ip addr show tun0
+ping 10.8.0.1
+Step 3: Test access to Virtual WAN networks
+
+# Test connectivity to simulated branch networks
+ping 10.0.1.1
+ping 10.0.2.1
+Monitoring and Troubleshooting
+Network Monitoring Commands
+Monitor VPN connections:
+
+sudo cat /var/log/openvpn.log
+sudo cat /etc/openvpn/openvpn-status.log
+Monitor network interfaces:
+
+ip addr show
+ip route show
+netstat -rn
+Monitor network traffic:
+
+sudo tcpdump -i tun0
+sudo iftop -i tun0
+Common Troubleshooting Steps
+If VPN server fails to start:
+
+# Check configuration syntax
+sudo openvpn --config /etc/openvpn/server.conf --verb 9
+
+# Check certificate permissions
+sudo ls -la /etc/openvpn/
+If client cannot connect:
+
+# Verify server is listening
+sudo netstat -tulpn | grep 1194
+
+# Check firewall rules
+sudo ufw status
+If routing doesn't work:
+
+# Verify IP forwarding
+cat /proc/sys/net/ipv4/ip_forward
+
+# Check routing table
+ip route show table all
+Lab Validation
+Validation Checklist
+Complete the following tests to validate your lab setup:
+
+Virtual WAN Connectivity Test:
+
+ All branch offices can communicate with the hub
+ Inter-branch communication works
+ Network performance meets expected parameters
+VPN Gateway Functionality Test:
+
+ VPN server starts successfully
+ Client can establish VPN connection
+ VPN client receives correct IP address
+ VPN client can access internal networks
+Hybrid Connectivity Test:
+
+ VPN clients can reach Virtual WAN resources
+ Routing between VPN and Virtual WAN works
+ Network security policies are enforced
+Performance Testing
+Bandwidth testing between sites:
+
+# Start iperf3 server on hub
+iperf3 -s -p 5001
+
+# Test from branch office
+iperf3 -c 10.0.1.10 -p 5001 -t 30
+Latency testing:
+
+# Test latency between sites
+ping -c 10 10.0.1.10
+mtr --report --report-cycles 10 10.0.1.10
+Conclusion
+In this lab, you have successfully:
+
+• Set up a Virtual WAN simulation using open-source tools like Mininet and Open vSwitch, demonstrating how modern software-defined networking enables simplified wide-area connectivity • Implemented a VPN Gateway using OpenVPN, providing secure hybrid connectivity between on-premises and cloud resources • Configured network routing and security policies to ensure proper traffic flow and access control • Tested and validated the complete networking solution using various monitoring and diagnostic tools
+
+Why This Matters
+Understanding Virtual WAN and VPN Gateway technologies is crucial in today's hybrid cloud environments because:
+
+• Simplified Management: Virtual WAN reduces the complexity of managing multiple network connections and routing policies • Hybrid Connectivity: VPN Gateways enable secure connections between on-premises infrastructure and cloud resources • Scalability: These technologies provide the foundation for scaling network infrastructure as organizations grow • Security: Proper implementation ensures secure communication across distributed networks • Cost Optimization: Efficient routing and bandwidth management help optimize network costs
+
+The skills you've developed in this lab are directly applicable to real-world scenarios where organizations need to connect multiple sites, enable remote access, and maintain secure hybrid cloud connectivity. These open-source tools provide the same fundamental concepts used in enterprise networking solutions, giving you practical experience with industry-standard networking practices.
